@@ -188,7 +188,7 @@ export default function ProviderReviewScreen() {
         { label: 'Registration', value: draft.transport.registrationNumber },
         { label: 'Driver', value: draft.transport.driverName },
         { label: 'Phone', value: draft.transport.driverPhone },
-        { label: 'CNIC', value: draft.transport.driverCnic },
+        { label: 'CNIC', value: draft.transport.driverCnic || 'Read from your CNIC photos' },
         { label: 'License', value: draft.transport.driverLicenseNumber },
         {
           label: 'Experience',
@@ -420,7 +420,7 @@ export default function ProviderReviewScreen() {
 
         {primaryVehicle ? (
           <ReviewSection icon="bus-outline" title="Primary vehicle"
-            editHref="/(provider)/vehicles/add?mode=onboarding" index={sectionIndex++}>
+            editHref="/(provider)/register/transport" index={sectionIndex++}>
             <Row label="Vehicle name" value={primaryVehicle.name} />
             <Row label="Registration" value={primaryVehicle.registrationNumber} />
             <Row label="Passenger seats" value={String(primaryVehicle.totalSeats)} />

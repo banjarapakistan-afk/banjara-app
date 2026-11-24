@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { useThemeColors } from '@/constants/colors';
+import { STAR_GOLD, useThemeColors } from '@/constants/colors';
 import type { ExploreThumb } from '@/constants/exploreCatalog';
 import { Radius, Shadows, Spacing } from '@/constants/spacing';
 import { Fonts } from '@/constants/typography';
@@ -88,7 +88,7 @@ export function ThumbnailGrid({
               ) : null}
               {item.rating != null ? (
                 <View style={styles.rating}>
-                  <Ionicons name="star" size={10} color="#F5B83D" />
+                  <Ionicons name="star" size={10} color={STAR_GOLD} />
                   <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
                 </View>
               ) : null}

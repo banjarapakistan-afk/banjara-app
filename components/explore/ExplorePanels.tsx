@@ -5,7 +5,6 @@ import { router } from 'expo-router';
 import { ExploreFilterChips, ThumbnailGrid } from '@/components/explore/ThumbnailGrid';
 import { HomeSection } from '@/components/travel/HomeSection';
 import { DestinationCard } from '@/components/travel/DestinationCard';
-import { AgencyTripSummaryCard } from '@/components/trip/AgencyTripSummaryCard';
 import { LocationPinSheet, formatPickedCity } from '@/components/location/LocationPinSheet';
 import {
   usePresentationColors as useThemeColors,
@@ -16,7 +15,6 @@ import {
   GUIDE_GENDERS,
   RESIDENCE_CLASSES,
   TOUR_TYPES,
-  VEHICLE_CLASSES,
   mapHotelResidenceClass,
   mapTripVehicleClass,
   type ExploreServiceTab,
@@ -31,7 +29,6 @@ import { Radius, Spacing } from '@/constants/spacing';
 import { Fonts } from '@/constants/typography';
 import { useBestTourOperators, useTourCatalog } from '@/hooks/useTourItineraries';
 import { useLocation } from '@/hooks/useLocation';
-import { groupTripsByAgency } from '@/utils/groupTripsByAgency';
 import type { Hotel } from '@/types/hotel';
 import type { Provider } from '@/types/provider';
 import type { Restaurant } from '@/types/restaurant';
@@ -39,6 +36,7 @@ import type { TourItinerary } from '@/types/tourItinerary';
 import type { TripWithDetails } from '@/types/trip';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { pushPath } from '@/utils/navigation';
+import type { ExploreSort } from '@/utils/exploreRefine';
 import {
   rankMostVisited,
   rankRestaurantsByOffers,
@@ -61,11 +59,12 @@ type ExplorePanelsProps = {
   query?: string;
   onOpenDestination?: (name: string) => void;
   onSearchRestaurants?: (city: string) => void;
+  /** The visitor's chosen sort; anything but "recommended" keeps the list's order. */
+  sort?: ExploreSort;
 };
 
 function EmptyCatalog({ title, message }: { title: string; message: string }) {
   const colors = useThemeColors();
-  const travel = useTravelPresentation();
   return (
     <View
       style={[
@@ -74,30 +73,53 @@ function EmptyCatalog({ title, message }: { title: string; message: string }) {
       ]}
     >
       <Text style={[styles.emptyTitle, { color: colors.dark }]}>{title}</Text>
-      <Text style={[styles.emptyBody, { color: colors.muted }]}>
-        {travel ? 'Try another filter or destination, or check back for new listings.' : message}
-      </Text>
+      <Text style={[styles.emptyBody, { color: colors.muted }]}>{message}</Text>
     </View>
   );
 }
 
-function hotelThumbs(hotels: Hotel[], residence: ResidenceClass): ExploreThumb[] {
-  return hotels
-    .filter((h) => mapHotelResidenceClass(h.hotelType) === residence)
-    .sort((a, b) => b.rating - a.rating)
-    .map((h) => ({
-      id: h.id,
-      title: h.name,
-      subtitle: h.location.city,
-      image: h.images[0] || FALLBACK_IMAGE,
-      rating: h.rating,
-      href: `/(customer)/hotels/${h.id}`,
-      badge: residence === 'lodge' ? 'Lodge' : residence === 'guest_house' ? 'Guest' : 'Hotel',
-      meta: h.priceFrom > 0 ? `From ${formatCurrency(h.priceFrom)}` : undefined,
-    }));
+/** Highest rated first — only for the default "Recommended" order; a sort the visitor picked wins. */
+function byRating<T extends { rating?: number; reviewCount?: number }>(list: T[], keepOrder: boolean) {
+  if (keepOrder) return list;
+  return [...list].sort(
+    (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || (b.reviewCount ?? 0) - (a.reviewCount ?? 0),
+  );
 }
 
-/** Vehicles of the local drivers offering live trips. */
+const RESIDENCE_BADGE: Record<ResidenceClass, string> = {
+  hotel: 'Hotel',
+  guest_house: 'Guest house',
+  lodge: 'Lodge',
+};
+
+/** Every stay in one list; perks (free cancellation, breakfast) ride along as the badge. */
+function hotelThumbs(
+  hotels: Hotel[],
+  residence: ResidenceClass | 'all',
+  keepOrder: boolean,
+): ExploreThumb[] {
+  return byRating(
+    hotels.filter(
+      (h) => residence === 'all' || mapHotelResidenceClass(h.hotelType) === residence,
+    ),
+    keepOrder,
+  ).map((h) => ({
+    id: h.id,
+    title: h.name,
+    subtitle: h.location.city,
+    image: h.images[0] || FALLBACK_IMAGE,
+    rating: h.rating,
+    href: `/(customer)/hotels/${h.id}`,
+    badge: h.freeCancellation
+      ? 'Free cancellation'
+      : h.breakfastIncluded || h.amenities?.includes('Breakfast')
+        ? 'Breakfast included'
+        : RESIDENCE_BADGE[mapHotelResidenceClass(h.hotelType)],
+    meta: h.priceFrom > 0 ? `From ${formatCurrency(h.priceFrom)} / night` : undefined,
+  }));
+}
+
+/** Vehicles of the local drivers offering live trips (used by the "Need a ride there?" cross-sell). */
 function tripVehicleThumbs(
   trips: TripWithDetails[],
 ): Array<ExploreThumb & { vehicleClass: VehicleClass }> {
@@ -121,51 +143,6 @@ function tripVehicleThumbs(
   return Array.from(byVehicle.values());
 }
 
-function tripProviderThumbs(trips: TripWithDetails[]): ExploreThumb[] {
-  return groupTripsByAgency(trips).map((g) => ({
-    id: g.agencyId,
-    title: g.agency.name,
-    subtitle: `${g.tripCount} trip${g.tripCount === 1 ? '' : 's'}`,
-    image: g.agency.logo || g.trips[0]?.image || g.trips[0]?.vehicleImages?.[0] || FALLBACK_IMAGE,
-    rating: g.agency.rating,
-    meta: g.routes[0],
-    href: `/(customer)/agency/${g.agencyId}`,
-  }));
-}
-
-/** Deals / offerings from lodging providers (featured, popular, breakfast, free cancel). */
-function hotelOfferThumbs(hotels: Hotel[], residence?: ResidenceClass): ExploreThumb[] {
-  let list = [...hotels];
-  if (residence) {
-    list = list.filter((h) => mapHotelResidenceClass(h.hotelType) === residence);
-  }
-  return list
-    .filter(
-      (h) =>
-        h.featured ||
-        h.popular ||
-        h.breakfastIncluded ||
-        h.freeCancellation ||
-        h.amenities?.includes('Breakfast'),
-    )
-    .sort((a, b) => b.rating - a.rating || a.priceFrom - b.priceFrom)
-    .map((h) => ({
-      id: `offer-${h.id}`,
-      title: h.name,
-      subtitle: [
-        h.breakfastIncluded || h.amenities?.includes('Breakfast') ? 'Breakfast' : null,
-        h.freeCancellation ? 'Free cancel' : null,
-        h.location.city,
-      ]
-        .filter(Boolean)
-        .join(' · '),
-      image: h.images[0] || FALLBACK_IMAGE,
-      rating: h.rating,
-      badge: h.featured || h.popular ? 'Deal' : 'Offer',
-      href: `/(customer)/hotels/${h.id}`,
-      meta: h.priceFrom > 0 ? `From ${formatCurrency(h.priceFrom)}` : undefined,
-    }));
-}
 
 function restaurantThumbs(list: Restaurant[], badge?: string): ExploreThumb[] {
   return list.map((r) => {
@@ -212,33 +189,39 @@ function guideDisplayName(p: Provider) {
   return p.businessName || 'Guide';
 }
 
-function guideThumbs(list: Provider[], gender: GuideGender): ExploreThumb[] {
-  return list
-    .filter((p) => {
+function guideThumbs(
+  list: Provider[],
+  gender: GuideGender | 'all',
+  keepOrder: boolean,
+): ExploreThumb[] {
+  return byRating(
+    list.filter((p) => {
       const g = String(p.tour?.gender ?? '').toLowerCase();
-      if (!g) return true;
-      return g === gender;
-    })
-    .sort(
-      (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || (b.reviewCount ?? 0) - (a.reviewCount ?? 0),
-    )
-    .map((p) => {
-      const reg = p.tour?.regionalLanguages?.length ?? 0;
-      const intl = p.tour?.internationalLanguages?.length ?? 0;
-      const years = p.tour?.yearsExperience ?? p.yearsExperience;
-      const langLine = `Languages ${reg} reg. ${intl} intl.`;
-      return {
-        id: p.id,
-        title: guideDisplayName(p),
-        subtitle: years ? `${years} yrs · ${langLine}` : langLine,
-        image: p.logo || p.tour?.images?.[0] || FALLBACK_IMAGE,
-        rating: p.rating || undefined,
-        badge:
-          p.tour?.gender === 'female' ? 'Female' : p.tour?.gender === 'male' ? 'Male' : undefined,
-        href: `/(customer)/guides/${p.id}`,
-        meta: langLine,
-      };
-    });
+      return gender === 'all' || !g || g === gender;
+    }),
+    keepOrder,
+  ).map((p) => {
+    // "Speaks Urdu, English" — never "Languages 0 reg. 0 intl."
+    const languages = [
+      ...(p.tour?.regionalLanguages ?? []),
+      ...(p.tour?.internationalLanguages ?? []),
+    ]
+      .map((l) => String(l).trim())
+      .filter(Boolean);
+    const langLine = languages.length
+      ? `Speaks ${languages.slice(0, 3).join(', ')}${languages.length > 3 ? ` +${languages.length - 3}` : ''}`
+      : undefined;
+    const years = p.tour?.yearsExperience ?? p.yearsExperience;
+    return {
+      id: p.id,
+      title: guideDisplayName(p),
+      subtitle: [years ? `${years} yrs experience` : null, p.city].filter(Boolean).join(' · '),
+      image: p.logo || p.tour?.images?.[0] || FALLBACK_IMAGE,
+      rating: p.rating || undefined,
+      href: `/(customer)/guides/${p.id}`,
+      meta: langLine,
+    };
+  });
 }
 
 function itineraryThumbs(list: TourItinerary[], badge?: string): ExploreThumb[] {
@@ -375,12 +358,15 @@ export function ExplorePanels({
   onOpenDestination,
   onSearchRestaurants,
   query,
+  sort = 'recommended',
 }: ExplorePanelsProps) {
   const colors = useThemeColors();
   const travel = useTravelPresentation();
-  const [vehicleClass, setVehicleClass] = useState<VehicleClass | 'all'>('all');
-  const [residence, setResidence] = useState<ResidenceClass>('hotel');
-  const [guideGender, setGuideGender] = useState<GuideGender>('male');
+  // A sort the visitor picked (price, rating…) must survive; only "Recommended" re-ranks.
+  const keepOrder = sort !== 'recommended';
+  // Start with everything: all stay types, every guide.
+  const [residence, setResidence] = useState<ResidenceClass | 'all'>('all');
+  const [guideGender, setGuideGender] = useState<GuideGender | 'all'>('all');
   const [restoCity, setRestoCity] = useState('');
   const [searchedCity, setSearchedCity] = useState('');
   const { location: userLocation, request: requestLocation } = useLocation();
@@ -390,20 +376,6 @@ export function ExplorePanels({
     if (tab === 'restaurants') void requestLocation();
   }, [tab, requestLocation]);
 
-  const allVehicles = useMemo(() => tripVehicleThumbs(trips), [trips]);
-
-  const availableClasses = useMemo(() => {
-    const present = new Set(allVehicles.map((v) => v.vehicleClass));
-    return VEHICLE_CLASSES.filter((v) => present.has(v.id));
-  }, [allVehicles]);
-
-  const vehicleItems = useMemo(() => {
-    if (vehicleClass === 'all') return allVehicles;
-    return allVehicles.filter((v) => v.vehicleClass === vehicleClass);
-  }, [allVehicles, vehicleClass]);
-
-  const transporterItems = useMemo(() => tripProviderThumbs(trips), [trips]);
-
   const residenceClassesWithData = useMemo(() => {
     const present = new Set(hotels.map((h) => mapHotelResidenceClass(h.hotelType)));
     return RESIDENCE_CLASSES.filter((r) => present.has(r.id));
@@ -411,16 +383,11 @@ export function ExplorePanels({
 
   const activeResidence = residenceClassesWithData.some((r) => r.id === residence)
     ? residence
-    : (residenceClassesWithData[0]?.id ?? residence);
+    : 'all';
 
   const residenceItems = useMemo(
-    () => hotelThumbs(hotels, activeResidence),
-    [hotels, activeResidence],
-  );
-
-  const stayOffers = useMemo(
-    () => hotelOfferThumbs(hotels, activeResidence),
-    [hotels, activeResidence],
+    () => hotelThumbs(hotels, activeResidence, keepOrder),
+    [hotels, activeResidence, keepOrder],
   );
 
   const offerRestaurants = useMemo(
@@ -433,8 +400,8 @@ export function ExplorePanels({
   );
 
   const mostVisitedRestaurants = useMemo(
-    () => rankMostVisited(restaurants, userLocation).slice(0, 12),
-    [restaurants, userLocation],
+    () => (keepOrder ? restaurants : rankMostVisited(restaurants, userLocation)).slice(0, 12),
+    [restaurants, userLocation, keepOrder],
   );
 
   const topRestaurantProviders = useMemo(
@@ -483,9 +450,10 @@ export function ExplorePanels({
     );
   }, [trips, hotels, restaurants, guides, tourProviders]);
 
-  const agencyGroups = useMemo(() => groupTripsByAgency(trips).slice(0, 4), [trips]);
-
-  const guideItems = useMemo(() => guideThumbs(guides, guideGender), [guides, guideGender]);
+  const guideItems = useMemo(
+    () => guideThumbs(guides, guideGender, keepOrder),
+    [guides, guideGender, keepOrder],
+  );
 
   const openDest = (name: string) => {
     if (onOpenDestination) onOpenDestination(name);
@@ -513,129 +481,26 @@ export function ExplorePanels({
           setDestinationMapOpen(false);
         }}
       />
-      {tab === 'transport' ? (
-        <>
-          <HomeSection
-            title="Diverse vehicles"
-            subtitle="Cars, jeeps and vans driven by local drivers"
-          >
-            {availableClasses.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.classRow}
-              >
-                <Pressable
-                  onPress={() => setVehicleClass('all')}
-                  style={[
-                    styles.miniChip,
-                    {
-                      backgroundColor: vehicleClass === 'all' ? colors.primary : colors.inputBg,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      color: vehicleClass === 'all' ? colors.white : colors.dark,
-                      fontFamily: Fonts.bodySemiBold,
-                      fontSize: 12,
-                    }}
-                  >
-                    All
-                  </Text>
-                </Pressable>
-                {availableClasses.map((v) => (
-                  <Pressable
-                    key={v.id}
-                    onPress={() => setVehicleClass(v.id)}
-                    style={[
-                      styles.miniChip,
-                      {
-                        backgroundColor: vehicleClass === v.id ? colors.primary : colors.inputBg,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={{
-                        color: vehicleClass === v.id ? colors.white : colors.dark,
-                        fontFamily: Fonts.bodyMedium,
-                        fontSize: 12,
-                      }}
-                    >
-                      {v.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            ) : null}
-            {vehicleItems.length ? (
-              <ThumbnailGrid
-                items={vehicleItems}
-                columns={4}
-                rows={compact ? 3 : 5}
-                showMoreLabel="Explore More"
-                onShowMore={() => router.push('/(customer)/results')}
-              />
-            ) : (
-              <EmptyCatalog
-                title="No vehicles yet"
-                message="Vehicles appear here when local drivers register their vehicle and publish trips."
-              />
-            )}
-          </HomeSection>
-
-          <HomeSection
-            title="Local drivers offering trips"
-            subtitle="Live trips from verified providers"
-          >
-            {transporterItems.length ? (
-              <ThumbnailGrid
-                items={transporterItems}
-                columns={4}
-                rows={3}
-                showMoreLabel="Show more"
-                onShowMore={() => router.push('/(customer)/results')}
-              />
-            ) : (
-              <EmptyCatalog
-                title="No drivers yet"
-                message="When local drivers publish trips, they show up here."
-              />
-            )}
-          </HomeSection>
-
-          {agencyGroups.length ? (
-            <HomeSection title="Trips by driver" subtitle="Book from live schedules">
-              <View style={styles.stack}>
-                {agencyGroups.map((group) => (
-                  <AgencyTripSummaryCard
-                    key={group.agencyId}
-                    group={group}
-                    onPress={() => pushPath(`/(customer)/agency/${group.agencyId}`)}
-                  />
-                ))}
-              </View>
-            </HomeSection>
-          ) : null}
-        </>
-      ) : null}
-
       {tab === 'hotels' ? (
         <>
-          {residenceClassesWithData.length ? (
-            <HomeSection title="Residence type" subtitle="From lodging providers on BANJARA">
+          {residenceClassesWithData.length > 1 ? (
+            <HomeSection title="Stay type" subtitle="Hotels, guest houses and lodges">
               <ExploreFilterChips
-                options={residenceClassesWithData}
+                options={[{ id: 'all' as const, label: 'All stays' }, ...residenceClassesWithData]}
                 value={activeResidence}
                 onChange={setResidence}
               />
             </HomeSection>
           ) : null}
+          {/* One list: perks like free cancellation show as a badge on each card, so a
+              separate "deals" list repeating the same stays isn't needed. */}
           <HomeSection
-            title={`Best ${RESIDENCE_CLASSES.find((r) => r.id === activeResidence)?.label ?? 'stays'}`}
-            subtitle="Listed by lodging providers"
+            title={
+              activeResidence === 'all'
+                ? 'Places to stay'
+                : `Best ${RESIDENCE_CLASSES.find((r) => r.id === activeResidence)?.label ?? 'stays'}`
+            }
+            subtitle="Prices per night, from verified lodging providers"
           >
             {residenceItems.length ? (
               <ThumbnailGrid
@@ -647,24 +512,12 @@ export function ExplorePanels({
               />
             ) : (
               <EmptyCatalog
-                title="No stays yet"
-                message="Hotels, guest houses and lodges appear when lodging providers complete sign-up."
-              />
-            )}
-          </HomeSection>
-          <HomeSection title="Offerings & deals" subtitle="Offers from lodging providers">
-            {stayOffers.length ? (
-              <ThumbnailGrid
-                items={stayOffers}
-                columns={4}
-                rows={3}
-                showMoreLabel="Show more"
-                onShowMore={() => router.push('/(customer)/(tabs)/hotels')}
-              />
-            ) : (
-              <EmptyCatalog
-                title="No deals yet"
-                message="Deals appear when lodging providers mark breakfast, free cancel, or featured stays."
+                title={hotels.length ? 'No stays match these filters' : 'No stays listed yet'}
+                message={
+                  hotels.length
+                    ? 'Try another stay type or clear the filters above.'
+                    : 'Hotels, guest houses and lodges appear here as soon as providers list them.'
+                }
               />
             )}
           </HomeSection>
@@ -673,20 +526,19 @@ export function ExplorePanels({
 
       {tab === 'guides' ? (
         <>
-          <HomeSection
-            title="Guides"
-            subtitle="Choose Male or Female — best-rated guides on BANJARA"
-          >
+          <HomeSection title="Guides" subtitle="Local experts for treks, jeep safaris and village walks">
             <ExploreFilterChips
-              options={GUIDE_GENDERS}
+              options={[{ id: 'all' as const, label: 'All guides' }, ...GUIDE_GENDERS]}
               value={guideGender}
               onChange={setGuideGender}
             />
           </HomeSection>
           {guideItems.length ? (
             <HomeSection
-              title={`Top ${guideGender === 'female' ? 'female' : 'male'} guides`}
-              subtitle="Name and languages (regional & international)"
+              title={
+                guideGender === 'all' ? 'Top local guides' : `Top ${guideGender} guides`
+              }
+              subtitle="Experience and the languages they speak"
             >
               <ThumbnailGrid
                 items={guideItems}
@@ -698,8 +550,12 @@ export function ExplorePanels({
             </HomeSection>
           ) : (
             <EmptyCatalog
-              title={`No ${guideGender} guides listed yet`}
-              message="Guide profiles appear here after travel guides register with gender and languages."
+              title={guideGender === 'all' ? 'No guides listed yet' : `No ${guideGender} guides listed yet`}
+              message={
+                guideGender === 'all'
+                  ? 'Guide profiles appear here as soon as local guides register.'
+                  : 'Try "All guides" to see every local guide.'
+              }
             />
           )}
         </>
@@ -895,7 +751,7 @@ export function ExplorePanels({
         </>
       ) : null}
 
-      {liveDestinations.length > 0 && !(travel && (tab === 'hotels' || tab === 'transport')) ? (
+      {liveDestinations.length > 0 && tab !== 'transport' ? (
         <HomeSection title="Popular destinations" subtitle="From live trips, stays and dining">
           <ScrollView
             horizontal
@@ -920,126 +776,85 @@ export function ExplorePanels({
   );
 }
 
-/** Volatile cross-sell per tab: ride→stay, hotels→ride, tours→guides, guides→restaurants. */
+/** One "what next" suggestion per tab: stay → ride, tours → guides, guides → food, food → guides. */
 export function FloatingCrossSell({
   tab,
   trips = [],
-  hotels = [],
   restaurants = [],
   guides = [],
+  onSwitchTab,
 }: {
   tab: ExploreServiceTab;
   trips?: TripWithDetails[];
   hotels?: Hotel[];
   restaurants?: Restaurant[];
   guides?: Provider[];
+  /** Switch Explore to another service tab (instead of a dead link). */
+  onSwitchTab?: (tab: ExploreServiceTab) => void;
 }) {
-  const stayItems = useMemo(() => {
-    const offers = hotelOfferThumbs(hotels);
-    if (offers.length) return offers.slice(0, 8);
-    return hotels.slice(0, 8).map((h) => ({
-      id: h.id,
-      title: h.name,
-      subtitle: h.location.city,
-      image: h.images[0] || FALLBACK_IMAGE,
-      rating: h.rating,
-      href: `/(customer)/hotels/${h.id}`,
-      badge: mapHotelResidenceClass(h.hotelType),
-      meta: h.priceFrom > 0 ? `From ${formatCurrency(h.priceFrom)}` : undefined,
-    }));
-  }, [hotels]);
-
   const rideItems = useMemo(() => tripVehicleThumbs(trips).slice(0, 8), [trips]);
-  const guideItems = useMemo(() => guideThumbs(guides, 'male').slice(0, 8), [guides]);
+  // Every guide, not just one gender.
+  const guideItems = useMemo(() => guideThumbs(guides, 'all', false).slice(0, 8), [guides]);
   const restoItems = useMemo(
     () => restaurantThumbs(rankRestaurantsByOffers(restaurants).slice(0, 8), 'Eat'),
     [restaurants],
   );
-
-  if (tab === 'transport') {
-    if (!stayItems.length) return null;
-    return (
-      <HomeSection
-        title="Looking for a place to stay?"
-        subtitle="Hotels & lodges after your ride — from lodging providers"
-        actionLabel="Browse"
-        onAction={() => router.push('/(customer)/(tabs)/hotels')}
-      >
-        <ThumbnailGrid
-          items={stayItems}
-          columns={4}
-          rows={2}
-          showMoreLabel="Show more"
-          onShowMore={() => router.push('/(customer)/(tabs)/hotels')}
-        />
-      </HomeSection>
-    );
-  }
+  // Rides live on the map now, not in a list.
+  const openRidesMap = () => pushPath('/(customer)/explore/nearby');
+  const openGuides = () =>
+    onSwitchTab ? onSwitchTab('guides') : pushPath('/(customer)/guides/index');
 
   if (tab === 'hotels') {
     if (!rideItems.length) return null;
     return (
       <HomeSection
         title="Need a ride there?"
-        subtitle="Vehicles & trips from local drivers"
-        actionLabel="Search rides"
-        onAction={() => router.push('/(customer)/results')}
+        subtitle="Cars, jeeps and vans from local drivers"
+        actionLabel="See rides on the map"
+        onAction={openRidesMap}
       >
         <ThumbnailGrid
           items={rideItems}
           columns={4}
           rows={2}
-          showMoreLabel="Show more"
-          onShowMore={() => router.push('/(customer)/results')}
+          showMoreLabel="See rides on the map"
+          onShowMore={openRidesMap}
         />
       </HomeSection>
     );
   }
 
-  if (tab === 'tours') {
+  if (tab === 'tours' || tab === 'restaurants') {
     if (!guideItems.length) return null;
     return (
       <HomeSection
-        title="Need a guide?"
-        subtitle="Local guides after you pick a tour operator"
+        title={tab === 'tours' ? 'Need a guide?' : 'Explore with a guide'}
+        subtitle="Verified local guides for the rest of your trip"
         actionLabel="Browse guides"
-        onAction={() => router.push('/(customer)/(tabs)/search')}
+        onAction={openGuides}
       >
-        <ThumbnailGrid items={guideItems} columns={4} rows={2} showMoreLabel="Show more" />
+        <ThumbnailGrid
+          items={guideItems}
+          columns={4}
+          rows={2}
+          showMoreLabel="Browse guides"
+          onShowMore={openGuides}
+        />
       </HomeSection>
     );
   }
 
   if (tab === 'guides') {
     if (!restoItems.length) return null;
+    const openFood = () => onSwitchTab?.('restaurants');
     return (
       <HomeSection
         title="Where to eat?"
-        subtitle="Restaurants near your guide’s destination"
-        actionLabel="Browse dining"
+        subtitle="Local restaurants with offers"
+        actionLabel={onSwitchTab ? 'Browse restaurants' : undefined}
+        onAction={onSwitchTab ? openFood : undefined}
       >
         <ThumbnailGrid items={restoItems} columns={4} rows={2} showMoreLabel="Show more" />
-      </HomeSection>
-    );
-  }
-
-  // Restaurants tab → suggest a local guide for the rest of the trip
-  if (tab === 'restaurants') {
-    if (!guideItems.length) return null;
-    return (
-      <HomeSection
-        title="Explore with a guide"
-        subtitle="Local guides after you pick where to eat"
-        actionLabel="Browse guides"
-        onAction={() => pushPath('/(customer)/guides/index')}
-      >
-        <ThumbnailGrid
-          items={guideItems}
-          columns={4}
-          rows={2}
-          showMoreLabel="Show more"
-          onShowMore={() => pushPath('/(customer)/guides/index')}
-        />
       </HomeSection>
     );
   }
@@ -1049,21 +864,6 @@ export function FloatingCrossSell({
 
 const styles = StyleSheet.create({
   root: { gap: 0 },
-  classRow: {
-    paddingHorizontal: Spacing.screen,
-    gap: 8,
-    paddingBottom: Spacing.sm,
-  },
-  miniChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: Radius.full,
-    borderWidth: 1,
-  },
-  stack: {
-    paddingHorizontal: Spacing.screen,
-    gap: Spacing.sm,
-  },
   hRow: { paddingHorizontal: Spacing.screen },
   searchField: {
     marginHorizontal: Spacing.screen,
@@ -1076,22 +876,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     minHeight: 46,
   },
-  restoSearchRow: {
-    paddingHorizontal: Spacing.screen,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: Spacing.sm,
-  },
   restoSearchCol: {
     paddingHorizontal: Spacing.screen,
     gap: 10,
     marginBottom: Spacing.sm,
-  },
-  restoSearchField: {
-    flex: 1,
-    marginHorizontal: 0,
-    marginBottom: 0,
   },
   restoSearchFieldFull: {
     marginHorizontal: 0,
@@ -1110,13 +898,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.body,
     fontSize: 12,
     paddingHorizontal: 4,
-  },
-  searchBtn: {
-    paddingHorizontal: 16,
-    minHeight: 46,
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   searchBtnText: {
     fontFamily: Fonts.bodySemiBold,

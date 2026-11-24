@@ -45,6 +45,10 @@ export interface Booking {
   providerId?: string;
   /** Provider's User id — required to open in-app chat */
   providerUserId?: string;
+  /** Provider phone — only sent for a confirmed booking from 24h before the trip until it ends. */
+  providerPhone?: string | null;
+  /** When the provider's phone becomes visible (confirmed booking, window not yet open). */
+  providerContactOpensAt?: string | null;
   date: string;
   seats: string[];
   pickupPointId: string;

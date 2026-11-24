@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import type { ExploreThumb } from '@/constants/exploreCatalog';
+import { STAR_GOLD } from '@/constants/colors';
 import { useHomeDesign } from '@/constants/homeDesign';
 import { Fonts } from '@/constants/typography';
 import { normalizeMediaUrl } from '@/utils/mediaUrl';
@@ -24,7 +25,8 @@ export function TravelCatalogGrid({
   const theme = useHomeDesign();
   const { width } = useWindowDimensions();
   const [expanded, setExpanded] = useState(false);
-  const cardWidth = (width - 44) / 2;
+  // Whole pixels: two fractional widths plus the gap can round past the row and wrap to one column.
+  const cardWidth = Math.floor((width - 32 - 12) / 2);
   const limit = 2 * Math.min(rows, 2);
   const visible = expanded ? items : items.slice(0, limit);
   return (
@@ -56,7 +58,7 @@ export function TravelCatalogGrid({
               ) : null}
               {item.rating != null && item.rating > 0 ? (
                 <View style={s.rating}>
-                  <Ionicons name="star" size={11} color="#E9AC45" />
+                  <Ionicons name="star" size={11} color={STAR_GOLD} />
                   <Text style={s.ratingText}>{item.rating.toFixed(1)}</Text>
                 </View>
               ) : null}

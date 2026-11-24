@@ -6,7 +6,6 @@ import { createURL } from 'expo-linking';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  Linking,
   Alert,
   Share,
   Modal,
@@ -397,8 +396,10 @@ export default function AgencyProfileScreen() {
     '';
 
   const locationLabel = [agency?.city, agency?.address].filter(Boolean).join(', ');
-  const canCall = Boolean(agency?.phone?.trim());
   const canMessage = Boolean(agency?.userId);
+  const openProviderChat = canMessage && agency
+    ? () => pushPath(`/(customer)/messages/${agency.userId}`)
+    : undefined;
   const showStickyCta =
     !loading &&
     !error &&
@@ -505,11 +506,7 @@ export default function AgencyProfileScreen() {
           void Share.share({ message: `${agency.name}\n${createURL(`/agency/${agency.id}`)}` })
             .catch((error) => Alert.alert('Could not share profile', getApiErrorMessage(error)));
         }}
-        onCall={canCall ? () => {
-          void Linking.openURL(`tel:${agency.phone.replace(/[^\d+]/g, '')}`)
-            .catch((error) => Alert.alert('Could not open phone', getApiErrorMessage(error)));
-        } : undefined}
-        onMessage={canMessage ? () => pushPath(`/(customer)/messages/${agency.userId}`) : undefined}
+        onMessage={openProviderChat}
         onTrip={openTrip}
       />
     );
@@ -632,43 +629,21 @@ export default function AgencyProfileScreen() {
                 </View>
               ) : null}
 
-              {(canCall || canMessage) && agency ? (
+              {openProviderChat ? (
                 <View style={styles.actions}>
-                  {canCall ? (
-                    <Pressable
-                      style={[
-                        styles.actionBtn,
-                        {
-                          borderColor: colors.border,
-                          backgroundColor: colors.card,
-                        },
-                      ]}
-                      onPress={() =>
-                        Linking.openURL(
-                          `tel:${agency.phone.replace(/\s/g, '')}`,
-                        )
-                      }
-                    >
-                      <Ionicons name="call-outline" size={18} color={colors.primary} />
-                      <Text style={[styles.actionLabel, { color: colors.primary }]}>Call</Text>
-                    </Pressable>
-                  ) : null}
-                  {canMessage ? (
-                    <Pressable
-                      style={[
-                        styles.actionBtn,
-                        {
-                          borderColor: colors.primarySoft,
-                          backgroundColor: colors.primarySoft,
-                        },
-                      ]}
-                      onPress={() => pushPath(`/(customer)/messages/${agency.userId}`)
-                      }
-                    >
-                      <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
-                      <Text style={[styles.actionLabel, { color: colors.primary }]}>Message</Text>
-                    </Pressable>
-                  ) : null}
+                  <Pressable
+                    style={[
+                      styles.actionBtn,
+                      {
+                        borderColor: colors.primarySoft,
+                        backgroundColor: colors.primarySoft,
+                      },
+                    ]}
+                    onPress={openProviderChat}
+                  >
+                    <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
+                    <Text style={[styles.actionLabel, { color: colors.primary }]}>Message</Text>
+                  </Pressable>
                 </View>
               ) : null}
 
@@ -717,7 +692,7 @@ export default function AgencyProfileScreen() {
                 )}
               />
 
-              <ContactCard agency={agency} provider={provider} />
+              <ContactCard agency={agency} provider={provider} onMessage={openProviderChat} />
 
               <Text style={[styles.sectionTitle, { color: colors.dark }]}>Gallery</Text>
               <AgencyGallery images={galleryImages} />

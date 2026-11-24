@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { AuthFonts } from '@/constants/authFonts';
 import { Colors } from '@/constants/colors';
 import { usePresentationColors, useTravelPresentation } from './TravelDesignProvider';
 import { useHomeDesign } from '@/constants/homeDesign';
 import { Radius, Spacing } from '@/constants/spacing';
+import { Tappable } from '@/components/ui/Tappable';
 
 type ListRowProps = {
   icon?: keyof typeof Ionicons.glyphMap;
@@ -102,14 +103,14 @@ export function ListRow({
   if (!onPress) return content;
 
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
       style={({ pressed }) => (pressed ? styles.pressed : null)}
     >
       {content}
-    </Pressable>
+    </Tappable>
   );
 }
 

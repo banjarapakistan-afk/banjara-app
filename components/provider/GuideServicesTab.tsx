@@ -137,7 +137,7 @@ export function GuideServicesTab() {
             onPress={() =>
               router.push({
                 pathname: '/(provider)/register/guide',
-                params: { from: 'edit', step: '7' },
+                params: { from: 'edit', step: 'schedule' },
               } as never)
             }
           />
@@ -152,7 +152,7 @@ export function GuideServicesTab() {
             onPress={() =>
               router.push({
                 pathname: '/(provider)/register/guide',
-                params: { from: 'edit', step: '6' },
+                params: { from: 'edit', step: 'services' },
               } as never)
             }
           >
@@ -176,7 +176,7 @@ export function GuideServicesTab() {
                   onPress={() =>
                     router.push({
                       pathname: '/(provider)/register/guide',
-                      params: { from: 'edit', step: '6' },
+                      params: { from: 'edit', step: 'services' },
                     } as never)
                   }
                 >

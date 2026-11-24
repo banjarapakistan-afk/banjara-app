@@ -135,7 +135,7 @@ export function GuideDashboard({
           onPress={() =>
             router.push({
               pathname: '/(provider)/register/guide',
-              params: { from: 'edit', step: '7' },
+              params: { from: 'edit', step: 'schedule' },
             } as never)
           }
         />

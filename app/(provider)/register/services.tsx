@@ -16,7 +16,7 @@ import {
 import { Radius, Spacing } from '@/constants/spacing';
 import { Fonts, Typography } from '@/constants/typography';
 import * as serviceCatalogService from '@/services/serviceCatalogService';
-import type { CatalogService } from '@/services/serviceCatalogService';
+import type { CatalogService, ProviderCounts } from '@/services/serviceCatalogService';
 import { useAuthStore } from '@/store/authStore';
 import { useProviderStore } from '@/store/providerStore';
 import { leaveProviderEditor, pushPath, useBlockBack } from '@/utils/navigation';
@@ -34,6 +34,8 @@ export default function ProviderSelectServicesScreen() {
 
   const [catalog, setCatalog] = useBackendState<CatalogService[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
+  // Real provider numbers per service; the cards still work if this fails.
+  const [counts, setCounts] = useBackendState<ProviderCounts | null>(null);
 
   const inOnboarding = needsProviderOnboarding(user) || (provider?.services.includes('transport') && !provider.onboardingProgress?.completed);
   const lockedType = provider?.services?.[0]
@@ -58,6 +60,22 @@ export default function ProviderSelectServicesScreen() {
   useEffect(() => {
     void loadCatalog();
   }, [loadCatalog]);
+
+  useEffect(() => {
+    let alive = true;
+    // Never let the numbers break the screen (offline, older backend, …).
+    Promise.resolve()
+      .then(() => serviceCatalogService.getProviderCounts())
+      .then((value) => {
+        if (alive) setCounts(value);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+    // Load once per visit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (user?.providerId) {
@@ -136,6 +154,14 @@ export default function ProviderSelectServicesScreen() {
           </View>
         ) : (
           <View style={styles.list}>
+            {counts && counts.total.registered > 0 ? (
+              <View style={styles.community}>
+                <Text style={styles.communityText}>
+                  <Text style={styles.communityStrong}>{counts.total.registered.toLocaleString('en-PK')}</Text> providers have joined BANJARA
+                  {counts.total.approved ? ` · ${counts.total.approved.toLocaleString('en-PK')} verified` : ''}
+                </Text>
+              </View>
+            ) : null}
             {options.map((option) => {
               const key = normalizeServiceKey(option.key);
               const active = normalizeServiceKey(selected[0] ?? '') === key;
@@ -152,6 +178,7 @@ export default function ProviderSelectServicesScreen() {
                     <Text style={styles.desc} numberOfLines={2}>
                       {option.description}
                     </Text>
+                    {counts ? <CountPill count={counts.services[key]} /> : null}
                     {active ? <Text style={styles.check}>✓ Selected</Text> : null}
                   </View>
                 </Pressable>
@@ -193,7 +220,34 @@ export default function ProviderSelectServicesScreen() {
   );
 }
 
+/** "9 on BANJARA · 8 verified", or an invitation when nobody has joined yet. */
+function CountPill({ count }: { count?: { approved: number; registered: number } }) {
+  if (!count?.registered) {
+    return (
+      <View style={[styles.pill, styles.pillNew]}>
+        <Text style={[styles.pillText, styles.pillTextNew]}>✨ Be one of the first on BANJARA</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.pill}>
+      <Text style={styles.pillText}>
+        <Text style={styles.pillStrong}>{count.registered.toLocaleString('en-PK')}</Text> on BANJARA
+        {count.approved ? ` · ${count.approved.toLocaleString('en-PK')} verified` : ''}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  community: { padding: Spacing.md, borderRadius: Radius.md, backgroundColor: Colors.primarySoft },
+  communityText: { fontFamily: Fonts.body, fontSize: 13, color: Colors.dark },
+  communityStrong: { fontFamily: Fonts.bodySemiBold, color: Colors.primary },
+  pill: { alignSelf: 'flex-start', marginTop: 6, paddingHorizontal: 10, paddingVertical: 3, borderRadius: Radius.full, backgroundColor: Colors.primarySoft },
+  pillNew: { backgroundColor: Colors.softAmber },
+  pillText: { fontFamily: Fonts.body, fontSize: 11.5, color: Colors.primary },
+  pillTextNew: { color: Colors.dark },
+  pillStrong: { fontFamily: Fonts.bodySemiBold },
   container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.lg, gap: Spacing.md },
   heading: { ...Typography.h2, color: Colors.dark },

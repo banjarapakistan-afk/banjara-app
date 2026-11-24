@@ -21,13 +21,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { TravelIcon } from '@/components/ui/TravelPrimitives';
 import { useHomeDesign } from '@/constants/homeDesign';
 import { Fonts } from '@/constants/typography';
+import { Tappable } from '@/components/ui/Tappable';
 
 /** One clip inside a story. */
 export type StorySlide = {
   video: VideoSource;
   caption: string;
   place?: string;
-  posted: string;
+  /** Optional time label; leave it out for evergreen tips (fake "2h ago" stamps erode trust). */
+  posted?: string;
 };
 
 /** One circle in the row: its clips, plus what its button does. */
@@ -81,7 +83,7 @@ export function HomeStoriesRow({ groups }: { groups: StoryGroup[] }) {
         {groups.map((group, index) => {
           const isSeen = seen.includes(group.id);
           return (
-            <Pressable
+            <Tappable
               key={group.id}
               onPress={() => setOpenIndex(index)}
               accessibilityRole="button"
@@ -117,15 +119,10 @@ export function HomeStoriesRow({ groups }: { groups: StoryGroup[] }) {
                   </View>
                 </View>
               </LinearGradient>
-              {!isSeen ? (
-                <View style={[s.newBadge, { borderColor: theme.background }]}>
-                  <Text style={s.newText}>NEW</Text>
-                </View>
-              ) : null}
               <Text style={[s.label, { color: theme.text }]} numberOfLines={1}>
                 {group.label}
               </Text>
-            </Pressable>
+            </Tappable>
           );
         })}
       </ScrollView>
@@ -310,7 +307,7 @@ function StoryViewer({
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.name}>{group.label}</Text>
-              <Text style={s.posted}>{slide.posted}</Text>
+              {slide.posted ? <Text style={s.posted}>{slide.posted}</Text> : null}
             </View>
             <Pressable
               hitSlop={8}
@@ -345,7 +342,7 @@ function StoryViewer({
             </View>
           ) : null}
           <Text style={s.caption}>{slide.caption}</Text>
-          <Pressable
+          <Tappable
             style={({ pressed }) => [s.cta, pressed && { opacity: 0.85 }]}
             onPress={() => {
               onClose();
@@ -355,7 +352,7 @@ function StoryViewer({
           >
             <Text style={s.ctaText}>{group.cta}</Text>
             <Ionicons name="arrow-forward" size={17} color="#fff" />
-          </Pressable>
+          </Tappable>
         </View>
       </Animated.View>
     </Animated.View>
@@ -442,14 +439,6 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  newBadge: {
-    marginTop: -9,
-    paddingHorizontal: 6,
-    borderRadius: 999,
-    borderWidth: 2,
-    backgroundColor: '#16B364',
-  },
-  newText: { color: '#fff', fontSize: 8, fontFamily: Fonts.bodyMedium, letterSpacing: 0.5 },
   label: { fontFamily: Fonts.bodyMedium, fontSize: 10, marginTop: 4 },
 
   overlay: { flex: 1, backgroundColor: '#000' },

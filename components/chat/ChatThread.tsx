@@ -83,6 +83,7 @@ export function ChatThread({ otherUserId, title = 'Chat', bookingId, backHref, a
   const selectedTrip = useBookingStore((state) => state.selectedTrip);
   const linkedAgency =
     selectedTrip?.agency.userId === otherUserId ? selectedTrip.agency : undefined;
+  const providerPhone = booking?.providerPhone?.replace(/[^+\d]/g, '') || undefined;
   const listRef = useRef<FlatList>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevCount = useRef(0);
@@ -237,10 +238,11 @@ export function ChatThread({ otherUserId, title = 'Chat', bookingId, backHref, a
           onInfo={() => setProfileOpen(true)}
           onProfile={() => pushPath('/(customer)/(tabs)/profile')}
           onCall={
-            linkedAgency?.phone
+            // Provider phone only arrives via the linked booking inside its contact window.
+            providerPhone
               ? () => {
-                  void Linking.openURL(`tel:${linkedAgency.phone.replace(/[^+\d]/g, '')}`).catch(
-                    () => Alert.alert('Call unavailable', 'Unable to open the phone app.'),
+                  void Linking.openURL(`tel:${providerPhone}`).catch(() =>
+                    Alert.alert('Call unavailable', 'Unable to open the phone app.'),
                   );
                 }
               : undefined

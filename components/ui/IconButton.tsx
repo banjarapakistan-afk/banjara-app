@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type ViewStyle } from 'react-native';
 import { useThemeColors } from '@/constants/colors';
+import { Tappable } from '@/components/ui/Tappable';
 
 type IconButtonProps = {
   onPress?: () => void;
@@ -22,7 +23,7 @@ export function IconButton({
   const colors = useThemeColors();
 
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
@@ -41,7 +42,7 @@ export function IconButton({
     >
       <View pointerEvents="none">{children}</View>
       {badge ? <View style={[styles.badge, { backgroundColor: colors.accent }]} /> : null}
-    </Pressable>
+    </Tappable>
   );
 }
 

@@ -28,6 +28,7 @@ import {
 import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate } from '@/utils/formatDate';
 import { pushPath } from '@/utils/navigation';
+import { dialablePhone, formatContactOpensAt } from '@/utils/providerContact';
 
 export default function HotelBookingDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -58,6 +59,10 @@ export default function HotelBookingDetailsScreen() {
 
   if (loading) return <LoadingState title="Loading booking..." />;
   if (!booking) return <ErrorState message="Hotel booking not found" />;
+
+  // Property phone is only released by the API inside the confirmed-booking window.
+  const providerPhone = dialablePhone(booking.providerPhone);
+  const contactOpensAt = formatContactOpensAt(booking.providerContactOpensAt);
 
   const onCancel = async () => {
     setCancelling(true);
@@ -197,14 +202,18 @@ export default function HotelBookingDetailsScreen() {
                       ),
                   }
                 : null,
-              hotel?.phone
+              providerPhone
                 ? {
                     key: 'call',
                     label: 'Call',
-                    subtitle: 'Hotel phone',
+                    subtitle: 'Property phone',
                     icon: 'call-outline' as const,
                     tone: 'green' as const,
-                    onPress: () => Linking.openURL(`tel:${hotel.phone.replace(/\s/g, '')}`),
+                    onPress: () => {
+                      void Linking.openURL(`tel:${providerPhone}`).catch(() =>
+                        Alert.alert('Could not open phone', 'Please message the property in chat instead.')
+                      );
+                    },
                   }
                 : null,
               booking.status !== 'cancelled' && booking.status !== 'completed' && !checkIn
@@ -222,6 +231,9 @@ export default function HotelBookingDetailsScreen() {
             ].filter(Boolean) as ActionItem[]
           }
         />
+        {!providerPhone && contactOpensAt ? (
+          <Text style={styles.contactNote}>Property's number appears from {contactOpensAt}</Text>
+        ) : null}
       </ScrollView>
 
       <Modal
@@ -238,6 +250,7 @@ export default function HotelBookingDetailsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  contactNote: { ...Typography.caption, color: Colors.muted, textAlign: 'center' },
   card: {
     backgroundColor: Colors.card,
     borderRadius: Radius.xl,

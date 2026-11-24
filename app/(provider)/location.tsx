@@ -20,6 +20,7 @@ import {
   LocationPermissionHandler,
   LocationSearchBar,
 } from '@/components/location';
+import { TransportSignupSteps } from '@/components/provider/TransportSignupSteps';
 import { Button } from '@/components/ui/Button';
 import { Header } from '@/components/ui/Header';
 import { Colors } from '@/constants/colors';
@@ -41,6 +42,10 @@ export default function BusinessLocationScreen() {
   const mapHeight = Math.max(240, Math.min(320, Math.round(screenHeight * 0.36)));
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const isOnboarding = mode === 'onboarding';
+  const signupService = useProviderStore(
+    (s) => s.draft.selectedServices[0] ?? s.provider?.services[0],
+  );
+  const isDriverSignup = isOnboarding && signupService === 'transport';
 
   const draft = useProviderStore((s) => s.draft);
   const provider = useProviderStore((s) => s.provider);
@@ -173,7 +178,7 @@ export default function BusinessLocationScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <Header
-        title="Business Location"
+        title={isDriverSignup ? 'Your location' : 'Business Location'}
         showBack
         fallbackHref={
           isOnboarding ? '/(provider)/register/business' : '/(provider)/settings'
@@ -219,10 +224,17 @@ export default function BusinessLocationScreen() {
           }]}
           showsVerticalScrollIndicator={false}
         >
+          {isDriverSignup ? (
+            <TransportSignupSteps current={2} hint="Drag the map to move the pin" />
+          ) : null}
           <View>
-            <Text style={styles.heading}>Pin your business</Text>
+            <Text style={styles.heading}>
+              {isDriverSignup ? 'Where do your rides start?' : 'Pin your business'}
+            </Text>
             <Text style={styles.sub}>
-              Search for your address, then move the map to place the pin at your entrance.
+              {isDriverSignup
+                ? 'Pin the place you usually start from, like your stand or home. Or tap “Use current location” below.'
+                : 'Search for your address, then move the map to place the pin at your entrance.'}
             </Text>
             {lastUpdated ? (
               <Text style={styles.updated}>

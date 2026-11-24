@@ -85,14 +85,17 @@ export function useGuides(city = '', options?: { autoLoad?: boolean }) {
   const autoLoad = options?.autoLoad !== false;
   const [guides, setGuides] = useBackendState<Provider[]>([]);
   const [loading, setLoading] = useState(autoLoad);
+  // Surface failures so screens can offer "Try again" instead of looking empty.
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!opts?.silent) setLoading(true);
+      setError(null);
       try {
         setGuides(await restaurantService.searchGuides(city));
-      } catch {
-        setGuides([]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not load guides');
       } finally {
         if (!opts?.silent) setLoading(false);
       }
@@ -105,7 +108,7 @@ export function useGuides(city = '', options?: { autoLoad?: boolean }) {
     void refresh();
   }, [autoLoad, refresh]);
 
-  return { guides, loading, refresh };
+  return { guides, loading, error, refresh };
 }
 
 export function useTourOperators(city = '', options?: { autoLoad?: boolean }) {

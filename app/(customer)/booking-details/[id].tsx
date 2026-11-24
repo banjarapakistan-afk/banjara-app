@@ -37,6 +37,7 @@ import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate, toISODate } from '@/utils/formatDate';
 import { formatTime } from '@/utils/formatTime';
 import { pushPath } from '@/utils/navigation';
+import { dialablePhone, formatContactOpensAt } from '@/utils/providerContact';
 
 export default function BookingDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -66,6 +67,9 @@ export default function BookingDetailsScreen() {
   const pickup =
     trip?.pickupLocations.find((point) => point.id === booking.pickupPointId) ??
     trip?.pickupLocations[0];
+  // Provider phone is only released by the API inside the confirmed-booking window.
+  const providerPhone = dialablePhone(booking.providerPhone);
+  const contactOpensAt = formatContactOpensAt(booking.providerContactOpensAt);
 
   const onCancel = async () => {
     setCancelling(true);
@@ -238,14 +242,18 @@ export default function BookingDetailsScreen() {
                       ),
                   }
                 : null,
-              trip?.agency.phone
+              providerPhone
                 ? {
                     key: 'call',
                     label: 'Call',
-                    subtitle: 'Provider phone',
+                    subtitle: 'Driver phone',
                     icon: 'call-outline' as const,
                     tone: 'green' as const,
-                    onPress: () => Linking.openURL(`tel:${trip.agency.phone}`),
+                    onPress: () => {
+                      void Linking.openURL(`tel:${providerPhone}`).catch(() =>
+                        Alert.alert('Could not open phone', 'Please message the driver in chat instead.')
+                      );
+                    },
                   }
                 : null,
               booking.status !== 'cancelled' && booking.status !== 'completed'
@@ -261,6 +269,9 @@ export default function BookingDetailsScreen() {
             ].filter(Boolean) as ActionItem[]
           }
         />
+        {!providerPhone && contactOpensAt ? (
+          <Text style={styles.contactNote}>Driver's number appears from {contactOpensAt}</Text>
+        ) : null}
       </ScrollView>
 
       <Modal
@@ -312,6 +323,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  contactNote: { ...Typography.caption, color: Colors.muted, textAlign: 'center' },
   upsellTitle: { ...Typography.bodyBold, color: Colors.primary },
   upsellBody: { ...Typography.caption, color: Colors.muted, lineHeight: 18, marginBottom: Spacing.sm },
 });

@@ -1,3 +1,4 @@
+import { Tappable } from '@/components/ui/Tappable';
 import { Image } from 'expo-image';
 import { useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
@@ -43,7 +44,7 @@ export function ProviderGallery({ images }: ProviderGalleryProps) {
         {uris.map((uri, index) => {
           const broke = Boolean(failed[uri]);
           return (
-            <Pressable
+            <Tappable
               key={`${uri}-${index}`}
               onPress={() => {
                 if (!broke) setActive(uri);
@@ -69,7 +70,7 @@ export function ProviderGallery({ images }: ProviderGalleryProps) {
                   onError={() => setFailed((current) => ({ ...current, [uri]: true }))}
                 />
               )}
-            </Pressable>
+            </Tappable>
           );
         })}
       </View>

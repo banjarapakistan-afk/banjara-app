@@ -171,3 +171,6 @@ export function useThemeColors(): ColorTokens {
 export function useIsDarkMode(): boolean {
   return useUserStore((state) => state.settings.darkMode);
 }
+
+/** One gold for every customer-facing rating star. */
+export const STAR_GOLD = '#F5B83D';

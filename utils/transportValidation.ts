@@ -29,7 +29,11 @@ export function vehicleVerificationError(
     return 'Enter a valid driver phone number (10–15 digits).';
   if (!validPhone(details.driverEmergencyContact))
     return 'Enter a valid emergency contact (10–15 digits).';
-  if ((details.driverCnic ?? '').replace(/\D/g, '').length !== 13)
+  // Filled in from the CNIC step; only check it when present.
+  if (
+    (details.driverCnic ?? '').trim() &&
+    (details.driverCnic ?? '').replace(/\D/g, '').length !== 13
+  )
     return 'Driver CNIC must contain 13 digits.';
   if (
     details.driverEmail?.trim() &&

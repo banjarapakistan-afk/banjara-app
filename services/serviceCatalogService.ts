@@ -54,3 +54,22 @@ export async function listActiveServices(): Promise<CatalogService[]> {
     sortOrder: index + 1,
   }));
 }
+
+export type ServiceCount = { approved: number; registered: number };
+export type ProviderCounts = { services: Record<string, ServiceCount>; total: ServiceCount };
+
+/** How many real providers are on BANJARA for each service (public numbers only). */
+export async function getProviderCounts(): Promise<ProviderCounts> {
+  const data = await get<AnyRecord>('/providers/public/counts');
+  const read = (value: unknown): ServiceCount => {
+    const row = (value ?? {}) as AnyRecord;
+    return {
+      approved: Math.max(0, Number(row.approved) || 0),
+      registered: Math.max(0, Number(row.registered) || 0),
+    };
+  };
+  const raw = (data?.services ?? {}) as AnyRecord;
+  const services: Record<string, ServiceCount> = {};
+  for (const [key, value] of Object.entries(raw)) services[normalizeServiceKey(key)] = read(value);
+  return { services, total: read(data?.total) };
+}

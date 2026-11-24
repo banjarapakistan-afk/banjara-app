@@ -275,7 +275,13 @@ function runtime(storage = new Map()) {
       pickImages: async () => [],
       uploadImages: async () => [],
     },
-    '@/services/serviceCatalogService': { listActiveServices: async () => [] },
+    '@/services/serviceCatalogService': {
+      listActiveServices: async () => [],
+      getProviderCounts: async () => ({
+        services: { transport: { approved: 8, registered: 9 } },
+        total: { approved: 8, registered: 9 },
+      }),
+    },
     '@/components/location': { LocationPinField: 'LocationPinField' },
     '@/components/provider/VehicleVerificationFields': {
       VehicleVerificationFields: 'VehicleVerificationFields',
@@ -284,6 +290,10 @@ function runtime(storage = new Map()) {
       RouteStopFields: 'RouteStopFields',
     },
     '@/components/ui/EmptyState': { LoadingState: 'LoadingState' },
+    '@expo/vector-icons': { Ionicons: 'Icon' },
+    '@/components/provider/TransportSignupSteps': {
+      TransportSignupSteps: 'TransportSignupSteps',
+    },
   };
   for (const name of [
     'Button',
@@ -575,7 +585,8 @@ test('the provider layout blocks dashboard/deep-link bypass, allows back navigat
   env.segments(['(provider)', '(tabs)']);
   let tree = env.runner.render(Layout);
   assert.equal(tree.type, 'Redirect');
-  assert.equal(tree.props.href.pathname, '/(provider)/vehicles/add');
+  // Vehicle details and the vehicle record share one signup screen.
+  assert.equal(tree.props.href, '/(provider)/register/transport');
   env.segments(['(provider)', 'register', 'review']);
   tree = env.runner.render(Layout);
   assert.equal(tree.type, 'Redirect');
@@ -592,99 +603,80 @@ test('the provider layout blocks dashboard/deep-link bypass, allows back navigat
   assert.ok(nodes(tree).some((node) => node.type === 'Spinner'));
 });
 
-test('the real transport screen preserves edits when remounted, validates them, and advances only after the checkpoint saves', async () => {
+test('the one vehicle step asks no driver or CNIC questions, validates, and saves vehicle + record before the CNIC step', async () => {
   const env = runtime();
   await flush();
   await env.store.getState().loadProviderByUser('user-1');
+  env.store.setState({ vehicles: [vehicle()] });
   const Screen = env.load('app/(provider)/register/transport.tsx').default;
   let tree = env.runner.render(Screen);
-  find(tree, 'Input', 'Your phone number *').onChangeText('123');
+  const labels = nodes(tree)
+    .filter((node) => node.type === 'Input')
+    .map((node) => node.props.label);
+  for (const asked of labels)
+    assert.doesNotMatch(asked, /CNIC|phone|emergency|address/i, `Step 3 must not re-ask "${asked}"`);
+  // The driving licence belongs with the vehicle on this step (prefilled when already saved).
+  assert.equal(find(tree, 'Input', 'Your driving licence number').value, 'LICENSE-123');
+  assert.equal(find(tree, 'Input', 'Make & model').value, 'Toyota Hiace');
+  find(tree, 'Input', 'Make & model').onChangeText('');
   tree = env.runner.render(Screen);
-  await find(tree, 'Button', 'Continue').onPress();
+  await find(tree, 'Button', 'Save vehicle & continue').onPress();
   assert.equal(env.routes.length, 0);
-  assert.match(env.alerts.at(-1).join(' '), /phone/);
-  find(tree, 'Input', 'Your phone number *').onChangeText('03001234567');
+  assert.match(env.alerts.at(-1).join(' '), /Vehicle model/);
+  find(tree, 'Input', 'Make & model').onChangeText('Toyota Hiace');
   tree = env.runner.render(Screen);
   const checkpoint = deferred();
-  env.service.saveOnboardingCheckpoint = () => checkpoint.promise;
-  const next = find(tree, 'Button', 'Continue').onPress();
+  env.service.saveOnboardingCheckpoint = (step) => {
+    env.calls.push(['checkpoint', step]);
+    return step === 'transport' ? checkpoint.promise : Promise.resolve(profile('verification'));
+  };
+  const next = find(tree, 'Button', 'Save vehicle & continue').onPress();
   await flush();
-  assert.equal(env.routes.length, 0);
+  assert.equal(env.routes.length, 0, 'Must wait for the checkpoint');
   checkpoint.resolve(profile('vehicle'));
   await next;
   await flush();
-  assert.equal(env.routes.at(-1), '/(provider)/vehicles/add?mode=onboarding');
+  const saved = env.calls.find((call) => call[0] === 'vehicle');
+  assert.equal(saved[1], 'vehicle-1', 'Must update the signup vehicle instead of creating a duplicate');
+  assert.equal(saved[2].totalSeats, 8);
+  assert.equal(saved[2].verificationDetails.engineNumber, 'ENGINE-001');
+  assert.equal(saved[2].verificationDetails.driverLicenseNumber, 'LICENSE-123');
+  assert.deepEqual(
+    env.calls.filter((call) => call[0] === 'checkpoint').map((call) => call[1]),
+    ['transport', 'vehicle'],
+  );
+  assert.equal(env.routes.at(-1), '/(provider)/register/verification', JSON.stringify(env.alerts));
 });
 
-test('the real Add Vehicle screen prefills verification details, requires seats, persists edits, and saves before advancing', async () => {
+test('old Add Vehicle signup links land on the vehicle step', async () => {
   const env = runtime();
   await flush();
   await env.store.getState().loadProviderByUser('user-1');
-  env.store.setState({ provider: profile('vehicle') });
   env.params({ mode: 'onboarding' });
   const Screen = env.load('app/(provider)/vehicles/add.tsx').default;
-  let tree = env.runner.render(Screen);
-  assert.equal(find(tree, 'Input', 'Vehicle model *').value, 'Toyota Hiace');
-  assert.equal(find(tree, 'Input', 'Registration number *').editable, false);
-  assert.equal(
-    find(tree, 'Input', 'Passenger seats (excluding driver) *').value,
-    '',
-  );
-  await find(tree, 'Button', 'Save vehicle and continue').onPress();
-  assert.equal(env.routes.length, 0);
-  assert.match(env.alerts.at(-1).join(' '), /seats/);
-  find(tree, 'Input', 'Passenger seats (excluding driver) *').onChangeText('7');
-  assert.equal(
-    env.store.getState().formDrafts['vehicle.primary.form'].totalSeats,
-    '7',
-  );
-  tree = env.runner.render(Screen);
-  await find(tree, 'Button', 'Save vehicle and continue').onPress();
-  await flush();
-  const saved = env.calls.find((call) => call[0] === 'vehicle');
-  assert.equal(
-    saved[1],
-    'vehicle-1',
-    'Must update the signup vehicle instead of creating a duplicate',
-  );
-  assert.equal(saved[2].totalSeats, 7);
-  assert.equal(saved[2].verificationDetails.engineNumber, 'ENGINE-001');
-  assert.deepEqual(saved[2].images, [
-    validTransport.vehicleImageFront,
-    validTransport.vehicleImageBack,
-  ]);
-  assert.equal(
-    env.routes.at(-1),
-    '/(provider)/register/verification',
-    JSON.stringify(env.alerts),
-  );
+  const tree = env.runner.render(Screen);
+  assert.equal(tree.type, 'Redirect');
+  assert.equal(tree.props.href, '/(provider)/register/transport');
 });
 
 test('vehicle save failures keep the user and their draft on the same step', async () => {
   const env = runtime();
   await flush();
   await env.store.getState().loadProviderByUser('user-1');
-  env.params({ mode: 'onboarding' });
-  env.store
-    .getState()
-    .setFormDraft('vehicle.primary.form', {
-      name: 'Saved name',
-      type: 'van',
-      model: 'Toyota Hiace',
-      year: '2022',
-      registrationNumber: 'TEST-123',
-      totalSeats: '7',
-    });
+  env.store.setState({ vehicles: [vehicle()] });
   env.service.updateVehicle = async () => {
     throw new Error('Offline');
   };
-  const Screen = env.load('app/(provider)/vehicles/add.tsx').default;
-  const tree = env.runner.render(Screen);
-  await find(tree, 'Button', 'Save vehicle and continue').onPress();
+  const Screen = env.load('app/(provider)/register/transport.tsx').default;
+  let tree = env.runner.render(Screen);
+  find(tree, 'Input', 'Make & model').onChangeText('Toyota Hiace Grand');
+  tree = env.runner.render(Screen);
+  await find(tree, 'Button', 'Save vehicle & continue').onPress();
+  for (let i = 0; i < 5; i++) await flush();
   assert.equal(env.routes.length, 0);
   assert.equal(
-    env.store.getState().formDrafts['vehicle.primary.form'].name,
-    'Saved name',
+    env.store.getState().formDrafts['vehicleStep.form'].vehicleModel,
+    'Toyota Hiace Grand',
   );
   assert.match(env.alerts.at(-1).join(' '), /Offline/);
 });
@@ -699,6 +691,10 @@ test('Transportation selection opens Business Info, including when resuming a pe
   await flush();
   env.store.getState().setSelectedServices(['transport']);
   let tree = env.runner.render(Screen);
+  // Real provider numbers from the API show on the service cards.
+  const pills = nodes(tree).filter((n) => n.props && Object.prototype.hasOwnProperty.call(n.props, 'count'));
+  assert.ok(pills.some((p) => p.props.count?.registered === 9), 'Transport card must show the real count');
+  assert.ok(pills.some((p) => !p.props.count), 'Services with nobody yet show an invitation');
   find(tree, 'Button', 'Continue').onPress();
   assert.equal(env.routes.at(-1), '/(provider)/register/business');
   env.store.setState({ provider: profile('transport') });
@@ -738,6 +734,7 @@ test('Driver details validate required fields, save edits as typed, and save bef
         formState: { errors: state.errors },
         setValue: state.set,
         watch: (fn) => {
+          if (Array.isArray(fn)) return fn.map((name) => state.values[name]);
           state.listeners.add(fn);
           return { unsubscribe: () => state.listeners.delete(fn) };
         },
@@ -751,30 +748,54 @@ test('Driver details validate required fields, save edits as typed, and save bef
   };
   const Screen = env.load('app/(provider)/register/business.tsx').default;
   let tree = env.runner.render(Screen);
+  // Name, phone and email come from the account: shown as a summary, not asked again.
+  assert.ok(
+    !nodes(tree).some((node) => node.type === 'Input' && node.props.label === 'Full name (as on your CNIC)'),
+  );
+  const edit = nodes(tree).find((node) => node.props?.accessibilityLabel === 'Edit name, phone and email');
+  assert.ok(edit, 'Account summary must offer Edit');
+  edit.props.onPress();
+  tree = env.runner.render(Screen);
   assert.equal(find(tree, 'Input', 'Full name (as on your CNIC)').value, 'Test Owner');
-  await find(tree, 'Button', 'Continue').onPress();
+  await find(tree, 'Button', 'Continue to location').onPress();
   assert.equal(env.routes.length, 0);
   assert.equal(env.calls.length, 0);
   for (const [label, value] of [
     ['Full name (as on your CNIC)', 'Ayesha Khan'],
     ['About you', 'I drive the Karakoram Highway every week'],
     ['Driving experience (years)', '0'],
+    ['Emergency contact number', '03110000000'],
   ]) {
     find(tree, 'Input', label).onChangeText(value);
   }
-  find(tree, 'SearchSelect', 'City').onChange('Islamabad');
-  find(tree, 'LocationPinField', 'Address').onChangeText('Test Road Islamabad');
+  // Step 1 asks about the person only: no licence (vehicle step) and no routes (dashboard, after approval).
+  assert.ok(!nodes(tree).some((node) => /licen/i.test(String(node.props?.label ?? ''))));
+  assert.ok(!nodes(tree).some((node) => Array.isArray(node.props?.routes)));
+  find(tree, 'PlaceAutocompleteSelect', 'Based in').onChange('Hunza', {
+    name: 'Karimabad',
+    address: { city: 'Hunza' },
+  });
+  // Permanent address comes from the place search and keeps the full address.
+  find(tree, 'PlaceAutocompleteSelect', 'Permanent address').onChange('Karimabad', {
+    name: 'Karimabad',
+    address: { city: 'Hunza', formattedAddress: 'Karimabad, Hunza, Gilgit-Baltistan, Pakistan' },
+  });
   assert.equal(
     env.store.getState().formDrafts.business.ownerName,
     'Ayesha Khan',
   );
   tree = env.runner.render(Screen);
-  await find(tree, 'Button', 'Continue').onPress();
-  const saved = env.calls.find((call) => call[0] === 'save')[1].business;
+  await find(tree, 'Button', 'Continue to location').onPress();
+  const savedDraft = env.calls.find((call) => call[0] === 'save')[1];
+  const saved = savedDraft.business;
   assert.equal(saved.yearsExperience, 0);
   // Rides are offered by individual drivers: the listing name is the driver's own name.
   assert.equal(saved.ownerName, 'Ayesha Khan');
   assert.equal(saved.businessName, 'Ayesha Khan');
+  // The same answers fill the driver record, so the vehicle step never asks for them.
+  assert.equal(savedDraft.transport.driverName, 'Ayesha Khan');
+  assert.equal(savedDraft.transport.driverEmergencyContact, '03110000000');
+  assert.equal(savedDraft.transport.driverPermanentAddress, 'Karimabad, Hunza, Gilgit-Baltistan, Pakistan');
   assert.equal(env.routes.at(-1).pathname, '/(provider)/location');
 });
 
@@ -784,11 +805,12 @@ test('transport form values and uploaded photos are restored after a complete st
   await env.store.getState().loadProviderByUser('user-1');
   let Screen = env.load('app/(provider)/register/transport.tsx').default;
   let tree = env.runner.render(Screen);
-  find(tree, 'Input', 'Your phone number *').onChangeText('03009999999');
+  find(tree, 'Input', 'Engine number').onChangeText('ENGINE-NEW');
   env.store
     .getState()
-    .setFormDraft('transport.front', [
+    .setFormDraft('vehicleStep.photos', [
       'https://example.com/unfinished-front.jpg',
+      '',
     ]);
   await flush();
   const reopened = runtime(env.storage);
@@ -796,10 +818,7 @@ test('transport form values and uploaded photos are restored after a complete st
   await reopened.store.getState().loadProviderByUser('user-1');
   Screen = reopened.load('app/(provider)/register/transport.tsx').default;
   tree = reopened.runner.render(Screen);
-  assert.equal(
-    find(tree, 'Input', 'Your phone number *').value,
-    '03009999999',
-  );
+  assert.equal(find(tree, 'Input', 'Engine number').value, 'ENGINE-NEW');
   assert.ok(
     nodes(tree).some(
       (node) =>
@@ -850,7 +869,7 @@ test('identity drafts serialize writes, restore after reload, separate accounts,
   );
 });
 
-test('the real CNIC screen blocks failed/unverified results and restores verified progress before allowing review', async () => {
+test('the real CNIC screen lets unverified drivers skip for now and restores verified progress before review', async () => {
   const env = runtime(); await flush();
   const saved = new Map();
   env.mocks['expo-secure-store'] = {
@@ -873,16 +892,228 @@ test('the real CNIC screen blocks failed/unverified results and restores verifie
   env.runner.render(Screen); await flush();
   let tree = env.runner.render(Screen);
   assert.equal(find(tree, 'Input', 'CNIC Number').value, '35202-1234567-1');
-  assert.equal(find(tree, 'Button', 'Continue to Review').disabled, true);
+  // Unverified: no "Continue", but a "Skip for now" (NADRA checks come later; the team checks by hand).
+  assert.ok(!nodes(tree).some((node) => node.type === 'Button' && node.props.title === 'Continue to Review'));
+  assert.equal(find(tree, 'Button', 'Skip for now').disabled, false);
   find(tree, 'Button', 'Verify CNIC').onPress(); await flush();
   tree = env.runner.render(Screen);
-  assert.equal(find(tree, 'Button', 'Continue to Review').disabled, true);
+  assert.ok(find(tree, 'Button', 'Skip for now'));
   verification.verifyCnic = async () => ({ verified: true, status: 'verified' });
   env.service.getProviderByUserId = async () => ({ ...profile('review'), identityVerification: { verificationStatus: 'verified', cnicVerified: true } });
   find(tree, 'Button', 'Verify CNIC').onPress(); await flush();
   tree = env.runner.render(Screen);
-  assert.equal(find(tree, 'Button', 'Continue to Review').disabled, false);
+  assert.ok(!find(tree, 'Button', 'Continue to Review').disabled);
   find(tree, 'Button', 'Continue to Review').onPress();
   assert.equal(env.routes.at(-1), '/(provider)/register/review');
   assert.equal((await identityStore.loadIdentityDraft('user-1')).frontUri, '');
+});
+
+test('guide setup asks each thing once, in four tabs, and checks each tab before saving', async () => {
+  const env = runtime();
+  await flush();
+  env.rn.TextInput = 'TextInput';
+  env.mocks['@expo/vector-icons'] = { Ionicons: 'Icon' };
+  env.mocks['@/components/ui/DatePickerModal'] = { DatePickerModal: 'DatePickerModal' };
+  const saves = [];
+  env.mocks['@/services/guideService'] = {
+    getMyProfile: async () => ({ guideDetails: null }),
+    updateProfile: async (patch, opts) => {
+      saves.push([patch, opts]);
+      return { guideDetails: patch };
+    },
+    refreshProviderAfterGuide: async () => null,
+  };
+  env.mocks['@/services/uploadService'] = { pickImages: async () => [{}], uploadImages: async () => [{ url: 'https://example.com/me.jpg' }] };
+  await env.store.getState().loadProviderByUser('user-1');
+  env.store.setState({ provider: { ...profile('transport'), services: ['travelGuide'] } });
+  const Screen = env.load('components/guide/GuideOnboardingScreen.tsx').default;
+  env.runner.render(Screen);
+  await flush();
+  let tree = env.runner.render(Screen);
+
+  // Nothing that another step already asks: no CNIC, WhatsApp, age or date of birth here.
+  const labels = nodes(tree).map((node) => String(node.props?.label ?? ''));
+  for (const label of labels) assert.doesNotMatch(label, /\b(CNIC|WhatsApp|Age|Date of birth)\b/i);
+  // Name and phone come from the account and show as a summary card.
+  assert.ok(nodes(tree).some((node) => node.props?.accessibilityLabel === 'Edit name, phone and email'));
+
+  // An empty profile cannot be saved.
+  await find(tree, 'Button', 'Save & continue').onPress();
+  await flush();
+  assert.equal(saves.length, 0);
+  assert.match(env.alerts.at(-1).join(' '), /profile photo/);
+
+  // Fill the profile tab.
+  find(tree, 'ImagePickerField', 'Profile photo *').onAdd();
+  for (let i = 0; i < 4; i++) await flush();
+  // The chip groups are a small component; tap them through its onToggle.
+  const tapChip = (label) => {
+    const group = nodes(tree).find((n) => Array.isArray(n.props?.options) && n.props.options.some((o) => o.label === label));
+    assert.ok(group, `Missing chip: ${label}`);
+    group.props.onToggle(group.props.options.find((o) => o.label === label).value);
+    tree = env.runner.render(Screen);
+  };
+  tree = env.runner.render(Screen);
+  tapChip('Trekking');
+  tapChip('Hunza');
+  tapChip('English');
+  nodes(tree).find((n) => n.props?.label === 'Short bio *').props.onChange('I have guided treks around Hunza and Nagar for eight years.');
+  tree = env.runner.render(Screen);
+  await find(tree, 'Button', 'Save & continue').onPress();
+  for (let i = 0; i < 4; i++) await flush();
+  assert.equal(saves.length, 1, JSON.stringify(env.alerts.at(-1)));
+  const [saved, opts] = saves[0];
+  assert.deepEqual(saved.guideTypes, ['trekking']);
+  assert.deepEqual(saved.areasCovered, ['Hunza']);
+  assert.deepEqual(saved.languages.map((l) => l.language), ['English']);
+  assert.equal(saved.profilePhoto, 'https://example.com/me.jpg');
+  assert.equal(opts.submit, false);
+
+  // Tab 2: services — needs a service or a daily rate.
+  tree = env.runner.render(Screen);
+  assert.ok(find(tree, 'Input', 'Rate per day (Rs)'));
+  await find(tree, 'Button', 'Save & continue').onPress();
+  await flush();
+  assert.equal(saves.length, 1);
+  assert.match(env.alerts.at(-1).join(' '), /service or a daily rate/);
+  find(tree, 'Input', 'Rate per day (Rs)').onChangeText('8000');
+  tree = env.runner.render(Screen);
+  await find(tree, 'Button', 'Save & continue').onPress();
+  for (let i = 0; i < 4; i++) await flush();
+  assert.equal(saves.length, 2);
+  assert.equal(saves[1][0].dailyHireRate, 8000);
+});
+
+test('tour operator setup: company tab, then a real first tour with a day plan sent for review', async () => {
+  const env = runtime();
+  await flush();
+  env.rn.TextInput = 'TextInput';
+  env.mocks['@expo/vector-icons'] = { Ionicons: 'Icon' };
+  const itineraries = [];
+  env.mocks['@/services/tourItineraryService'] = {
+    listMine: async () => [],
+    createItinerary: async (body) => {
+      itineraries.push(body);
+      return { ...body, id: 'tour-1', status: 'pending' };
+    },
+    updateItinerary: async (id, body) => ({ ...body, id, status: 'pending' }),
+  };
+  env.mocks['@/services/uploadService'] = { pickImages: async () => [{}], uploadImages: async () => [{ url: 'https://example.com/deosai.jpg' }] };
+  await env.store.getState().loadProviderByUser('user-1');
+  env.store.setState({ provider: { ...profile('transport'), services: ['tour'], tour: undefined } });
+  env.store.getState().setSelectedServices(['tour']);
+  const Screen = env.load('app/(provider)/register/tours.tsx').default;
+  env.runner.render(Screen);
+  await flush();
+  let tree = env.runner.render(Screen);
+  const tap = (label) => {
+    const group = nodes(tree).find((n) => Array.isArray(n.props?.options) && n.props.options.some((o) => o.label === label));
+    assert.ok(group, `Missing chip: ${label}`);
+    group.props.onToggle(group.props.options.find((o) => o.label === label).value);
+    tree = env.runner.render(Screen);
+  };
+  const type = (label, value) => {
+    nodes(tree).find((n) => n.props?.label === label).props[ 'onChangeText' in nodes(tree).find((n) => n.props?.label === label).props ? 'onChangeText' : 'onChange' ](value);
+    tree = env.runner.render(Screen);
+  };
+
+  // No fake defaults any more: an empty company cannot continue.
+  find(tree, 'Button', 'Save & continue').onPress();
+  await flush();
+  assert.match(env.alerts.at(-1).join(' '), /company description/);
+
+  type('Company name *', 'Skardu Trails');
+  type('About your company *', 'Family-run operator from Skardu running small-group treks.');
+  tap('Skardu');
+  tap('Treks');
+  find(tree, 'Button', 'Save & continue').onPress();
+  for (let i = 0; i < 4; i++) await flush();
+  tree = env.runner.render(Screen);
+  assert.equal(env.store.getState().draft.tour.companyName, 'Skardu Trails');
+  assert.deepEqual(env.store.getState().draft.tour.operatingAreas, ['Skardu']);
+
+  // Tab 2: the day plan follows the number of days.
+  assert.equal(nodes(tree).filter((n) => n.props?.label === 'Title').length, 3);
+  type('Tour name *', 'Deosai Trek — 3 Days');
+  type('One-line summary *', 'Camp on the Deosai plains and spot brown bears.');
+  type('Price per person (Rs) *', '45000');
+  const titles = nodes(tree).filter((n) => n.props?.label === 'Title');
+  titles.forEach((t, i) => t.props.onChangeText(`Day ${i + 1} plan`));
+  tree = env.runner.render(Screen);
+  find(tree, 'ImagePickerField', 'Cover photo *').onAdd();
+  for (let i = 0; i < 4; i++) await flush();
+  tree = env.runner.render(Screen);
+  find(tree, 'Button', 'Save & continue to CNIC').onPress();
+  for (let i = 0; i < 6; i++) await flush();
+  assert.equal(itineraries.length, 1, JSON.stringify(env.alerts.at(-1)));
+  const sent = itineraries[0];
+  assert.equal(sent.title, 'Deosai Trek — 3 Days');
+  assert.equal(sent.destination, 'Skardu');
+  assert.equal(sent.days.length, 3);
+  assert.equal(sent.durationNights, 2);
+  assert.equal(sent.submitForReview, true);
+  assert.ok(sent.description.length >= 20, 'description is built from the plan');
+  assert.equal(sent.coverImage, 'https://example.com/deosai.jpg');
+  assert.equal(env.routes.at(-1), '/(provider)/register/verification');
+});
+
+test('restaurant setup: no made-up content, nothing asked twice, then menu & offers', async () => {
+  const env = runtime();
+  await flush();
+  env.rn.TextInput = 'TextInput';
+  env.mocks['@expo/vector-icons'] = { Ionicons: 'Icon' };
+  env.mocks['@/services/uploadService'] = { pickImages: async () => [{}], uploadImages: async () => [{ url: 'https://example.com/karahi.jpg' }] };
+  await env.store.getState().loadProviderByUser('user-1');
+  env.store.setState({ provider: { ...profile('transport'), services: ['restaurant'], restaurant: undefined } });
+  env.store.getState().setSelectedServices(['restaurant']);
+  env.store.getState().setLocationDraft({
+    latitude: 36.31,
+    longitude: 74.65,
+    placeName: 'Karimabad',
+    address: { city: 'Hunza', formattedAddress: 'Karimabad Bazaar, Hunza', country: 'Pakistan' },
+  });
+  const Screen = env.load('app/(provider)/register/restaurant.tsx').default;
+  let tree = env.runner.render(Screen);
+  const labels = nodes(tree).map((n) => String(n.props?.label ?? ''));
+  // Phone, city, address and website come from the account and the map pin.
+  for (const label of labels) assert.doesNotMatch(label, /\b(Phone|City|Address|Website)\b/i);
+  // No made-up cuisines, dishes or offers are pre-filled any more.
+  const chipGroups = nodes(tree).filter((n) => Array.isArray(n.props?.options));
+  assert.deepEqual(chipGroups.find((g) => g.props.options.some((o) => o.label === 'Pakistani')).props.selected, []);
+
+  const tap = (label) => {
+    const group = nodes(tree).find((n) => Array.isArray(n.props?.options) && n.props.options.some((o) => o.label === label));
+    assert.ok(group, `Missing chip: ${label}`);
+    group.props.onToggle(group.props.options.find((o) => o.label === label).value);
+    tree = env.runner.render(Screen);
+  };
+  find(tree, 'Button', 'Save & continue').onPress();
+  for (let i = 0; i < 3; i++) await flush();
+  assert.match(env.alerts.at(-1).join(' '), /photo/);
+
+  find(tree, 'ImagePickerField', 'Restaurant photos *').onAdd();
+  for (let i = 0; i < 4; i++) await flush();
+  tree = env.runner.render(Screen);
+  find(tree, 'Input', 'Restaurant name *').onChangeText('Rakaposhi View Café');
+  tree = env.runner.render(Screen);
+  tap('Hunza local');
+  nodes(tree).find((n) => n.props?.label === 'Short description *').props.onChange('Family restaurant with a terrace view of Rakaposhi.');
+  tree = env.runner.render(Screen);
+  find(tree, 'Button', 'Save & continue').onPress();
+  for (let i = 0; i < 4; i++) await flush();
+  tree = env.runner.render(Screen);
+  const saved = env.store.getState().draft.restaurant;
+  assert.equal(saved.restaurantName, 'Rakaposhi View Café');
+  assert.equal(saved.address, 'Karimabad Bazaar, Hunza');
+  assert.equal(saved.city, 'Hunza');
+  assert.equal(saved.hours, 'Every day · 09:00–23:00');
+  assert.equal(saved.latitude, 36.31);
+
+  // Tab 2: dish ideas come from the chosen cuisine.
+  tap('Chapshoro');
+  find(tree, 'Button', 'Save & continue to CNIC').onPress();
+  for (let i = 0; i < 4; i++) await flush();
+  assert.deepEqual(env.store.getState().draft.restaurant.menuVariety, ['Chapshoro']);
+  assert.deepEqual(env.store.getState().draft.restaurant.offers, []);
+  assert.equal(env.routes.at(-1), '/(provider)/register/verification');
 });

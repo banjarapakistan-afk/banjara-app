@@ -20,6 +20,7 @@ export default function ProviderLayout() {
   const online = useBackendStatus() === 'online';
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const user = useAuthStore((state) => state.user);
+  const token = useAuthStore((state) => state.token);
   const provider = useProviderStore((state) => state.provider);
   const draft = useProviderStore((state) => state.draft);
   const loadedFor = useProviderStore((state) => state.profileLoadedFor);
@@ -116,15 +117,29 @@ export default function ProviderLayout() {
       const statusPage = segments.some(
         (segment) => segment === 'status' || segment === 'success',
       );
+      // CNIC verification can be skipped for now (NADRA checks come later): with only the
+      // CNIC step left, Review is open too, and the BANJARA team checks the CNIC by hand.
+      const skippedCnic = nextStep === 'verification' && currentStep === 'review';
       if (
         (!currentStep && !(statusPage && nextStep === 'submitted')) ||
         (currentStep &&
+          !skippedCnic &&
           TRANSPORT_STEPS.indexOf(currentStep) >
             TRANSPORT_STEPS.indexOf(nextStep)) ||
         (statusPage && nextStep !== 'submitted')
       )
         return <Redirect href={transportStepHref(nextStep)} />;
     }
+  }
+
+  // A signed-in traveller account never becomes a provider (provider accounts are
+  // separate), so it only sees the sign-up start page, which explains that. Guests can
+  // still go through provider sign-up: it creates a new provider account at the end.
+  const signedInTraveller =
+    isAuthenticated && user?.role === 'customer' && token !== 'guest-token';
+  const onSignupStart = segments[segments.length - 1] === 'register';
+  if (signedInTraveller && !onSignupStart) {
+    return <Redirect href="/(customer)/(tabs)" />;
   }
 
   if (isAuthenticated && user?.role === 'customer' && !inProviderOnboarding) {
@@ -162,6 +177,9 @@ export default function ProviderLayout() {
       <Stack.Screen name="transport/trips/create" />
       <Stack.Screen name="transport/route-add" />
       <Stack.Screen name="transport/stop-add" />
+      <Stack.Screen name="intercity/index" />
+      <Stack.Screen name="intercity/settings" />
+      <Stack.Screen name="intercity/commission" />
       <Stack.Screen name="hotel/index" />
       <Stack.Screen name="hotel/availability" />
       <Stack.Screen name="hotel/check-in" />

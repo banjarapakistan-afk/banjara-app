@@ -89,14 +89,10 @@ export const WEEKDAY_LABELS: Record<Weekday, string> = {
   sunday: 'Sun',
 };
 
+/** The guide setup tabs (the location step comes before; CNIC and Review after). */
 export const GUIDE_ONBOARDING_STEPS = [
-  'Basic info',
-  'Location',
-  'Professional',
-  'Languages',
-  'Documents',
+  'Profile',
   'Services',
   'Availability',
   'Photos',
-  'Review',
 ] as const;

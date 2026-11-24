@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import CreateTripScreen from '@/app/(provider)/transport/trips/create';
 import { MessagesHeaderActions } from '@/components/chat/MessagesHeaderActions';
+import { DriverCityToCityEntry } from '@/components/intercity/CityToCityEntry';
 import { GuideDashboard } from '@/components/provider/GuideDashboard';
 import { HospitalityDashboard } from '@/components/provider/HospitalityDashboard';
 import { ProviderEarningsFeeCard } from '@/components/provider/ProviderEarningsFeeCard';
@@ -468,6 +469,8 @@ export default function ProviderDashboardScreen() {
           tone="green"
         />
       </View>
+
+      <DriverCityToCityEntry />
 
       {/* Trip capacity analytics */}
       <View style={styles.sectionCard}>

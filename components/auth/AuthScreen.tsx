@@ -38,6 +38,7 @@ import { AuthFonts } from '@/constants/authFonts';
 import { Colors, useThemeColors } from '@/constants/colors';
 import { AUTH_BG_IMAGE } from '@/constants/destinations';
 import { Radius, Shadows, Spacing } from '@/constants/spacing';
+import { Tappable } from '@/components/ui/Tappable';
 
 type AuthScreenProps = {
   title: string;
@@ -236,7 +237,7 @@ export function AuthScreen({
           />
           <View style={styles.heroBar}>
             {showBack ? (
-              <Pressable
+              <Tappable
                 onPress={onBack}
                 style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
                 accessibilityRole="button"
@@ -244,7 +245,7 @@ export function AuthScreen({
                 hitSlop={8}
               >
                 <ArrowLeft size={20} color={Colors.white} strokeWidth={2.2} />
-              </Pressable>
+              </Tappable>
             ) : (
               <View style={styles.backBtnSpacer} />
             )}
@@ -272,7 +273,7 @@ export function AuthScreen({
                 style={[StyleSheet.absoluteFill, styles.centerAll, animatedDismissStyle]}
                 pointerEvents={isKeyboardOpen ? 'auto' : 'none'}
               >
-                <Pressable
+                <Tappable
                   onPress={Keyboard.dismiss}
                   style={({ pressed }) => [styles.dismissBtn, pressed && styles.dismissBtnPressed]}
                   accessibilityRole="button"
@@ -280,7 +281,7 @@ export function AuthScreen({
                   hitSlop={8}
                 >
                   <Ionicons name="chevron-down" size={20} color={Colors.white} />
-                </Pressable>
+                </Tappable>
               </Animated.View>
             </View>
           </View>

@@ -12,38 +12,22 @@ import { Radius, Shadows, Spacing } from '@/constants/spacing';
 import { Fonts } from '@/constants/typography';
 import type { Agency } from '@/types/trip';
 import type { Provider } from '@/types/provider';
-import { publicWebsite } from '@/utils/providerDetails';
 
-async function openContact(url: string, action: string) {
+async function openMap(url: string) {
   try {
     await Linking.openURL(url);
   } catch {
-    Alert.alert(
-      'Could not open ' + action,
-      'Please try again or use the contact details shown here.',
-    );
+    Alert.alert('Could not open maps', 'Please try again.');
   }
 }
 
-function ContactMethod({
-  icon,
-  label,
-  value,
-  action,
-  url,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: string;
-  action: string;
-  url: string;
-}) {
+function MessageMethod({ onPress }: { onPress: () => void }) {
   const colors = useThemeColors();
   return (
     <TouchableOpacity
-      onPress={() => void openContact(url, label.toLowerCase())}
-      accessibilityRole="link"
-      accessibilityLabel={`${action}: ${value}`}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Message provider in Banjara chat"
       activeOpacity={0.7}
       style={[
         styles.method,
@@ -54,33 +38,37 @@ function ContactMethod({
       ]}
     >
       <View style={[styles.icon, { backgroundColor: colors.surfaceSecondary }]}>
-        <Ionicons name={icon} size={19} color={colors.primary} />
+        <Ionicons name="chatbubble-ellipses-outline" size={19} color={colors.primary} />
       </View>
       <View style={styles.methodCopy}>
-        <Text style={[styles.label, { color: colors.muted }]}>{label}</Text>
+        <Text style={[styles.label, { color: colors.muted }]}>Chat</Text>
         <Text style={[styles.actionText, { color: colors.primary }]}>
-          {action} <Ionicons name="arrow-forward" size={12} />
+          Message <Ionicons name="arrow-forward" size={12} />
         </Text>
       </View>
     </TouchableOpacity>
   );
 }
 
+/**
+ * Customer-facing provider contact card. Direct phone/email/website details are
+ * intentionally not shown: customers reach providers through Banjara chat.
+ */
 export function ContactCard({
   agency,
   provider,
+  onMessage,
 }: {
   agency: Agency | null;
   provider: Provider | null;
+  /** Opens the in-app chat with this provider. */
+  onMessage?: () => void;
 }) {
   const colors = useThemeColors();
   const address =
     provider?.structuredAddress?.formattedAddress?.trim() ||
     agency?.address?.trim();
   const city = agency?.city?.trim();
-  const phone = agency?.phone?.trim();
-  const email = agency?.email?.trim();
-  const website = publicWebsite(agency?.website);
   const latitude = provider?.latitude;
   const longitude = provider?.longitude;
   const hasCoordinates =
@@ -93,13 +81,14 @@ export function ContactCard({
   const mapQuery = hasCoordinates
     ? `${latitude},${longitude}`
     : address || city;
-  if (!address && !city && !phone && !email && !website && !hasCoordinates)
-    return null;
+  if (!mapQuery && !onMessage) return null;
   return (
     <View style={styles.section}>
       <Text style={[styles.title, { color: colors.dark }]}>Get in touch</Text>
       <Text style={[styles.description, { color: colors.muted }]}>
-        Ask about your journey or find the provider’s business location.
+        {onMessage
+          ? 'Message the provider in Banjara chat or find their business location.'
+          : 'Find the provider’s business location.'}
       </Text>
       <View
         style={[
@@ -135,10 +124,9 @@ export function ContactCard({
             ) : null}
             <TouchableOpacity
               onPress={() =>
-                void openContact(
+                void openMap(
                   'https://www.google.com/maps/search/?api=1&query=' +
                     encodeURIComponent(mapQuery),
-                  'maps',
                 )
               }
               accessibilityRole="link"
@@ -162,52 +150,14 @@ export function ContactCard({
             </Text>
           </View>
         ) : null}
-        <View style={[styles.methods, { borderColor: colors.border }]}>
-          {phone ? (
-            <ContactMethod
-              icon="call-outline"
-              label="Phone"
-              value={phone}
-              action="Call provider"
-              url={'tel:' + phone.replace(/[^\d+]/g, '')}
-            />
-          ) : null}
-          {email ? (
-            <ContactMethod
-              icon="mail-outline"
-              label="Email"
-              value={email}
-              action="Write an email"
-              url={'mailto:' + encodeURIComponent(email)}
-            />
-          ) : null}
-          {website ? (
-          <ContactMethod
-            icon="globe-outline"
-            label="Website"
-            value={website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-            action="Open website"
-            url={website}
-          />
-        ) : null}
-        </View>
-        {phone || email || website ? (
-          <View style={styles.contactDetails}>
-            {phone ? (
-              <Text selectable style={[styles.value, { color: colors.dark }]}>
-                {phone}
-              </Text>
-            ) : null}
-            {email ? (
-              <Text selectable style={[styles.value, { color: colors.muted }]}>
-                {email}
-              </Text>
-            ) : null}
-            {website ? (
-              <Text selectable style={[styles.value, { color: colors.muted }]}>
-                {website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-              </Text>
-            ) : null}
+        {onMessage ? (
+          <View
+            style={[
+              styles.methods,
+              mapQuery ? { borderColor: colors.border } : styles.methodsNoBorder,
+            ]}
+          >
+            <MessageMethod onPress={onMessage} />
           </View>
         ) : null}
       </View>
@@ -267,13 +217,6 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     writingDirection: 'auto',
   },
-  value: {
-    fontFamily: Fonts.bodySemiBold,
-    fontSize: 14,
-    lineHeight: 24,
-    writingDirection: 'auto',
-    flexShrink: 1,
-  },
   mapButton: {
     minHeight: 48,
     borderRadius: Radius.md,
@@ -309,10 +252,6 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  contactDetails: {
-    paddingHorizontal: Spacing.xl,
-    paddingBottom: Spacing.xl,
-    gap: Spacing.xs,
-  },
+  methodsNoBorder: { borderTopWidth: 0 },
   methodCopy: { alignItems: 'center', width: '100%' },
 });

@@ -1,3 +1,4 @@
+import { Tappable } from '@/components/ui/Tappable';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import type { ReactNode } from 'react';
@@ -312,14 +313,14 @@ export function ChildServiceCard({ item }: { item: ChildServiceItem }) {
   if (!item.onPress) return content;
 
   return (
-    <Pressable
+    <Tappable
       onPress={item.onPress}
       accessibilityRole="button"
       accessibilityLabel={item.title}
       style={({ pressed }) => (pressed ? styles.pressed : null)}
     >
       {content}
-    </Pressable>
+    </Tappable>
   );
 }
 

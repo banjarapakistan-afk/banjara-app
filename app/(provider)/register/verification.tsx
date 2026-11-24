@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CnicCropModal } from '@/components/provider/CnicCropModal';
 import { CnicImageField } from '@/components/provider/CnicImageField';
+import { TransportSignupSteps } from '@/components/provider/TransportSignupSteps';
 import { Button } from '@/components/ui/Button';
 import { Header } from '@/components/ui/Header';
 import { Input } from '@/components/ui/Input';
@@ -201,7 +202,7 @@ export default function ProviderVerificationScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title="CNIC Verification" showBack fallbackHref={transportation ? '/(provider)/vehicles/add?mode=onboarding' as never : '/(provider)/register/business'} />
+      <Header title="CNIC Verification" showBack fallbackHref={transportation ? '/(provider)/register/transport' as never : '/(provider)/register/business'} />
       <ScrollView
         contentContainerStyle={{
           padding: Spacing.lg,
@@ -210,8 +211,14 @@ export default function ProviderVerificationScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
+        {transportation ? <TransportSignupSteps current={4} hint="Last step" /> : null}
         <View>
           <Text style={[styles.heading, { color: colors.dark }]}>CNIC Verification</Text>
+          {transportation ? (
+            <Text style={{ color: colors.muted, marginTop: 4 }}>
+              Take clear photos of both sides. We read your CNIC number, father’s name and expiry date from them, so you don’t have to type them.
+            </Text>
+          ) : null}
           {verified ? <Text style={{ color: colors.success }}>Your saved CNIC verification is complete. You can continue to review.</Text> : null}
           {identity.error ? <Text style={{ color: colors.danger }}>{identity.error}</Text> : null}
           <Text style={[styles.sub, { color: colors.muted }]}>
@@ -318,15 +325,28 @@ export default function ProviderVerificationScreen() {
 
         {result ? <ResultCard result={result} /> : null}
 
-        <Button
-          title="Continue to Review"
-          disabled={Boolean(transportation && !verified)}
-          variant="outline"
-          onPress={() => {
-            if (transportation && !verified) { Alert.alert('Verification required', 'Verify your CNIC before continuing.'); return; }
-            router.push('/(provider)/register/review');
-          }}
-        />
+        {verified || !transportation ? (
+          <Button
+            title="Continue to Review"
+            variant="outline"
+            onPress={() => router.push('/(provider)/register/review')}
+          />
+        ) : (
+          // Temporary while NADRA verification is being connected: drivers can submit without it,
+          // and the BANJARA team checks the CNIC by hand during review (the backend allows this).
+          <View style={[styles.skipCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <Text style={[styles.skipTitle, { color: colors.dark }]}>Short on time?</Text>
+            <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 18 }}>
+              Live NADRA checks are coming soon. Skip now and submit — our team will check your CNIC during review.
+            </Text>
+            <Button
+              title="Skip for now"
+              variant="outline"
+              disabled={verifying}
+              onPress={() => router.push('/(provider)/register/review')}
+            />
+          </View>
+        )}
       </ScrollView>
 
       <CnicCropModal
@@ -407,6 +427,8 @@ function ResultCard({ result }: { result: cnicVerification.CnicVerifyResult }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  skipCard: { gap: Spacing.sm, padding: Spacing.md, borderRadius: Radius.lg, borderWidth: 1 },
+  skipTitle: { fontFamily: Fonts.bodySemiBold, fontSize: 15 },
   heading: { ...Typography.h2 },
   sub: { ...Typography.body, marginTop: Spacing.xs, lineHeight: 22 },
   card: {

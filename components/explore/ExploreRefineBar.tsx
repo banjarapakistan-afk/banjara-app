@@ -107,12 +107,12 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: 13,
-    minHeight: 36,
-    borderRadius: 18,
+    minHeight: 44, // comfortable thumb target
+    borderRadius: 22,
     borderWidth: 1,
   },
   text: { fontFamily: Fonts.bodySemiBold, fontSize: 13 },
   divider: { width: 1, height: 20, marginHorizontal: 2 },
-  clear: { paddingHorizontal: 10, minHeight: 36, justifyContent: 'center' },
+  clear: { paddingHorizontal: 10, minHeight: 44, justifyContent: 'center' },
   count: { fontFamily: Fonts.body, fontSize: 12, paddingHorizontal: 16, paddingBottom: 4 },
 });

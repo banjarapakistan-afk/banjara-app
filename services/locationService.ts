@@ -5,11 +5,32 @@ import type {
   StructuredAddress,
 } from '@/types/location';
 
+/** Recent searches in memory: re-typing or going back never waits for the network twice. */
+const SEARCH_TTL_MS = 10 * 60 * 1000;
+const SEARCH_CACHE_MAX = 100;
+const searchCache = new Map<string, { at: number; value: Promise<PlaceSearchResult[]> }>();
+
+/** Searches all of Pakistan (curated Banjara places + OpenStreetMap) through the backend. */
 export async function searchPlaces(query: string, limit = 5): Promise<PlaceSearchResult[]> {
-  const data = await get<PlaceSearchResult[]>('/businesses/search', {
-    params: { q: query, limit },
-  });
-  return Array.isArray(data) ? data : [];
+  const q = query.trim().replace(/\s+/g, ' ');
+  if (q.length < 2) return [];
+  const key = `${q.toLowerCase()}|${limit}`;
+  const hit = searchCache.get(key);
+  if (hit && Date.now() - hit.at < SEARCH_TTL_MS) return hit.value;
+  const value = get<PlaceSearchResult[]>('/businesses/search', {
+    params: { q, limit },
+  }).then((data) => (Array.isArray(data) ? data : []));
+  // Cache the promise so identical searches in flight share one request.
+  searchCache.set(key, { at: Date.now(), value });
+  if (searchCache.size > SEARCH_CACHE_MAX) searchCache.delete(searchCache.keys().next().value!);
+  try {
+    const result = await value;
+    if (!result.length) searchCache.delete(key);
+    return result;
+  } catch (error) {
+    searchCache.delete(key);
+    throw error;
+  }
 }
 
 export async function reverseGeocode(

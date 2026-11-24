@@ -156,6 +156,10 @@ export interface HotelBooking {
   userId: string;
   providerId?: string;
   providerUserId?: string;
+  /** Property phone — only sent for a confirmed booking from 24h before check-in until checkout. */
+  providerPhone?: string | null;
+  /** When the property's phone becomes visible (confirmed booking, window not yet open). */
+  providerContactOpensAt?: string | null;
   checkIn: string;
   checkOut: string;
   adults: number;

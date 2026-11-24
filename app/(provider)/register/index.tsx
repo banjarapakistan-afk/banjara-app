@@ -44,6 +44,8 @@ export default function ProviderRegisterScreen() {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const token = useAuthStore((state) => state.token);
+  const logout = useAuthStore((state) => state.logout);
   const registerUser = useAuthStore((state) => state.register);
   const isLoading = useAuthStore((state) => state.isLoading);
   const authError = useAuthStore((state) => state.error);
@@ -92,6 +94,32 @@ export default function ProviderRegisterScreen() {
 
   if (isAuthenticated && user?.role === 'provider') {
     return <Redirect href={getHomeHref(user)} />;
+  }
+
+  // Traveller and provider accounts are separate: a signed-in traveller signs out first,
+  // then creates the provider account with a different email.
+  if (isAuthenticated && user?.role === 'customer' && token !== 'guest-token') {
+    return (
+      <View style={styles.container}>
+        <Header title="Service Provider" showBack fallbackHref="/(customer)/(tabs)" />
+        <View style={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
+          <Text style={styles.heading}>You&apos;re signed in as a traveller</Text>
+          <Text style={styles.sub}>
+            {user.email ? `${user.email} is a traveller account. ` : ''}Provider accounts are
+            separate from traveller accounts. Sign out, then create your provider account with a
+            different email address.
+          </Text>
+          <View style={styles.form}>
+            <Button title="Sign out and create a provider account" onPress={() => void logout()} />
+            <Button
+              title="Back to my trips"
+              variant="outline"
+              onPress={() => router.replace('/(customer)/(tabs)')}
+            />
+          </View>
+        </View>
+      </View>
+    );
   }
 
   return (
@@ -188,7 +216,9 @@ export default function ProviderRegisterScreen() {
           <Pressable style={styles.terms} onPress={() => setValue('terms', !terms)}>
             <View style={[styles.checkbox, terms && styles.checkboxOn]} />
             <Text style={styles.termsText}>
-              I agree to Banjara Terms & Conditions for service providers.
+              I agree to Banjara Terms & Conditions for service providers, including that all
+              bookings and customer contact happen through Banjara. Taking a Banjara customer&apos;s
+              booking outside the app can lead to account suspension.
             </Text>
           </Pressable>
           {formState.errors.terms ? (

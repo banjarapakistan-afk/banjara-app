@@ -1,5 +1,6 @@
+import { Tappable } from '@/components/ui/Tappable';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type ViewStyle } from 'react-native';
 import { Colors, useThemeColors } from '@/constants/colors';
 import { Radius, Shadows, Spacing } from '@/constants/spacing';
 
@@ -38,14 +39,14 @@ export function Card({
   if (!onPress) return body;
 
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
     >
       {body}
-    </Pressable>
+    </Tappable>
   );
 }
 

@@ -13,6 +13,7 @@ import { Radius, Shadows, Spacing } from '@/constants/spacing';
 import { Fonts } from '@/constants/typography';
 import type { Coordinates, PickupPoint } from '@/types/route';
 import { formatTime } from '@/utils/formatTime';
+import { pushPath } from '@/utils/navigation';
 
 type MapDetailPanelProps = {
   pickup: PickupPoint;
@@ -135,10 +136,8 @@ export function MapDetailPanel({
             <PersonCard
               title="Provider"
               name={vehicle.agencyName || vehicle.name}
-              phone={vehicle.phone}
               avatarUrl={vehicle.agencyLogo || vehicle.imageUrl}
               tone="provider"
-              onCall={() => callPhone(vehicle.phone)}
               embedded
             />
             <View style={styles.vehicleStrip}>
@@ -155,14 +154,14 @@ export function MapDetailPanel({
                     : ''}
                 </Text>
               </View>
-              {vehicle.phone ? (
+              {vehicle.providerUserId ? (
                 <Pressable
-                  style={styles.callBtn}
-                  onPress={() => callPhone(vehicle.phone)}
+                  style={styles.messageBtn}
+                  onPress={() => pushPath(`/(customer)/messages/${vehicle.providerUserId}`)}
                   accessibilityRole="button"
-                  accessibilityLabel="Call provider"
+                  accessibilityLabel="Message provider"
                 >
-                  <Ionicons name="call" size={14} color={Colors.white} />
+                  <Ionicons name="chatbubble-ellipses" size={14} color={Colors.white} />
                 </Pressable>
               ) : null}
             </View>
@@ -216,7 +215,7 @@ function PersonCard({
   phone?: string;
   avatarUrl?: string;
   tone: 'you' | 'provider';
-  onCall: () => void;
+  onCall?: () => void;
   embedded?: boolean;
 }) {
   return (
@@ -239,7 +238,7 @@ function PersonCard({
           </Text>
         ) : null}
       </View>
-      {phone ? (
+      {phone && onCall ? (
         <Pressable style={styles.personCall} onPress={onCall} hitSlop={8}>
           <Ionicons name="call-outline" size={15} color={Colors.action} />
         </Pressable>
@@ -416,11 +415,11 @@ const styles = StyleSheet.create({
     color: Colors.muted,
     marginTop: 1,
   },
-  callBtn: {
+  messageBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: Colors.success,
+    backgroundColor: Colors.action,
     alignItems: 'center',
     justifyContent: 'center',
   },

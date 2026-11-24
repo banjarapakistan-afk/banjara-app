@@ -1,37 +1,24 @@
-import type { ScrollViewInstance } from 'react-native';
+import type { ScrollViewInstance, TextInputInstance } from 'react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Keyboard,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Keyboard, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { ServicePickerSheet } from '@/components/explore/ServicePickerSheet';
-import { useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { ExplorePanels, FloatingCrossSell } from '@/components/explore/ExplorePanels';
-import {
-  ExploreBanner,
-  ExploreHelp,
-  ExploreServiceSelector,
-  ExploreTransportPanel,
-} from '@/components/explore/ExploreDiscovery';
+import { ExploreHelp, ExploreServiceSelector } from '@/components/explore/ExploreDiscovery';
 import { ExploreRefineBar } from '@/components/explore/ExploreRefineBar';
+import { ExploreIntro, ExplorePromo, ExploreRoads, useRoadAdvisory } from '@/components/explore/ExploreSections';
+import { CityToCityEntry } from '@/components/intercity/CityToCityEntry';
 import { HomeTopBar } from '@/components/home/HomeDiscovery';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { TravelDesignProvider } from '@/components/ui/TravelDesignProvider';
 import { TravelTextField } from '@/components/ui/TravelForm';
 import { useExploreDesign } from '@/constants/exploreDesign';
 import type { ExploreServiceTab } from '@/constants/exploreCatalog';
-import { Fonts } from '@/constants/typography';
 import { usePopularHotels } from '@/hooks/useHotels';
 import { useGuides, useRestaurants, useTourOperators } from '@/hooks/useRestaurants';
 import { useRecommendedTrips } from '@/hooks/useTrips';
 import { useAuthStore } from '@/store/authStore';
-import { useSearchStore } from '@/store/searchStore';
 import { useUserStore } from '@/store/userStore';
 import {
   DEFAULT_REFINE,
@@ -44,60 +31,103 @@ import {
 import { pushPath } from '@/utils/navigation';
 
 const EXPLORE_SERVICES: readonly string[] = ['transport', 'hotels', 'tours', 'guides', 'restaurants'];
+/** Every ride on the map (the visitor skipped or blocked location). */
+const ALL_RIDES_MAP = '/(customer)/explore/nearby';
 function isExploreService(value: string | undefined): value is ExploreServiceTab {
   return !!value && EXPLORE_SERVICES.includes(value);
+}
+
+const SEARCH_PLACEHOLDER: Record<ExploreServiceTab, string> = {
+  transport: 'Vehicle, driver or destination',
+  hotels: 'Hotel, guest house or city',
+  tours: 'Tour, operator or destination',
+  guides: 'Guide name or city',
+  restaurants: 'Restaurant, cuisine or city',
+};
+
+/** Card-shaped placeholders while listings load, instead of a spinner over empty space. */
+function ListingSkeletons() {
+  return (
+    <View style={s.skeletonGrid} accessibilityLabel="Loading listings" accessibilityRole="progressbar">
+      {[0, 1, 2, 3].map((i) => (
+        <View key={i} style={s.skeletonCard}>
+          <Skeleton height={120} radius={16} />
+          <Skeleton width="80%" height={14} style={{ marginTop: 10 }} />
+          <Skeleton width="50%" height={12} style={{ marginTop: 6 }} />
+        </View>
+      ))}
+    </View>
+  );
 }
 
 export default function ExploreScreen() {
   const theme = useExploreDesign();
   const user = useAuthStore((state) => state.user);
-  const profile = useUserStore((state) => state.profile);
   const notifications = useUserStore((state) => state.notifications);
-  const toggleSavedTrip = useUserStore((state) => state.toggleSavedTrip);
   const { service } = useLocalSearchParams<{ service?: string }>();
+  // Stay is the default tab. Rides are never listed here: Ride opens the map instead.
   const [tab, setTab] = useState<ExploreServiceTab>(() =>
-    isExploreService(service) ? service : 'transport',
+    isExploreService(service) && service !== 'transport' ? service : 'hotels',
   );
   // Home deep-links here with ?service=…; keep the tab in sync when it changes.
+  // A ride link (e.g. Home's "Browse transport") opens every ride on the map.
   useEffect(() => {
-    if (isExploreService(service)) setTab(service);
+    if (service === 'transport') {
+      // Drop the param so the same link works again later (and Back doesn't bounce to the map).
+      router.setParams({ service: undefined });
+      pushPath(ALL_RIDES_MAP);
+    } else if (isExploreService(service)) setTab(service);
   }, [service]);
   const [refineState, setRefine] = useState<ExploreRefine>(DEFAULT_REFINE);
   // Settings only apply to services that offer them (e.g. 'Free cancellation' is hotels-only).
   const refine = useMemo(() => sanitizeRefine(tab, refineState), [tab, refineState]);
-  const [searchVisible, setSearchVisible] = useState(false);
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const scroll = useRef<ScrollViewInstance>(null);
+  const searchInput = useRef<TextInputInstance>(null);
+  const roads = useRoadAdvisory();
+  // Trips only feed the "Need a ride there?" suggestion; rides themselves live on the map.
+  const { trips, refresh: refreshTrips } = useRecommendedTrips();
   const {
-    trips,
-    loading: tripsLoading,
-    error: tripsError,
-    refresh: refreshTrips,
-  } = useRecommendedTrips();
-  const { hotels, loading: hotelsLoading, refresh: refreshHotels } = usePopularHotels();
+    hotels,
+    loading: hotelsLoading,
+    error: hotelsError,
+    refresh: refreshHotels,
+  } = usePopularHotels();
   const {
     restaurants,
     loading: restosLoading,
+    error: restosError,
     refresh: refreshRestos,
     searchByDestination,
   } = useRestaurants();
-  const { guides, loading: guidesLoading, refresh: refreshGuides } = useGuides();
-  const { tours: tourProviders, loading: toursLoading, refresh: refreshTours } = useTourOperators();
+  const {
+    guides,
+    loading: guidesLoading,
+    error: guidesError,
+    refresh: refreshGuides,
+  } = useGuides();
+  const { tours: tourProviders, refresh: refreshTours } = useTourOperators();
 
-  const refreshAll = useCallback(async () => {
-    await Promise.all([
-      refreshTrips(),
-      refreshHotels(),
-      refreshRestos(),
-      refreshGuides(),
-      refreshTours(),
-    ]);
-  }, [refreshTrips, refreshHotels, refreshRestos, refreshGuides, refreshTours]);
+  const refreshAll = useCallback(
+    async (silent: boolean) => {
+      const opts = { silent };
+      await Promise.all([
+        refreshTrips(opts),
+        refreshHotels(opts),
+        refreshRestos(opts),
+        refreshGuides(opts),
+        refreshTours(opts),
+      ]);
+    },
+    [refreshTrips, refreshHotels, refreshRestos, refreshGuides, refreshTours],
+  );
 
+  // Coming back to Explore updates listings quietly in the background: what is already
+  // on screen stays put instead of being replaced by a loading state.
   useFocusEffect(
     useCallback(() => {
-      void refreshAll();
+      void refreshAll(true);
     }, [refreshAll]),
   );
 
@@ -119,13 +149,18 @@ export default function ExploreScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await refreshAll();
+      await refreshAll(true);
     } finally {
       setRefreshing(false);
     }
   };
 
   const changeService = (next: ExploreServiceTab) => {
+    // Ride: find the visitor's location and open the nearby-rides map (or all rides if skipped).
+    if (next === 'transport') {
+      setPicker('locating');
+      return;
+    }
     setTab(next);
     setQuery('');
     setRefine(DEFAULT_REFINE);
@@ -137,12 +172,7 @@ export default function ExploreScreen() {
     const matches = (...parts: Array<string | undefined>) =>
       !term || parts.join(' ').toLowerCase().includes(term);
     return {
-      trips: refineTrips(
-        trips.filter((trip) =>
-          matches(trip.vehicleName, trip.vehicleType, trip.agency.name, trip.from, trip.to),
-        ),
-        refine,
-      ),
+      trips: refineTrips(trips, DEFAULT_REFINE),
       hotels: refineHotels(
         hotels.filter((hotel) => matches(hotel.name, hotel.location.city, hotel.location.area)),
         refine,
@@ -165,33 +195,15 @@ export default function ExploreScreen() {
     };
   }, [query, refine, trips, hotels, restaurants, guides, tourProviders]);
 
-  const openRoute = (from: string, to: string) => {
-    const search = useSearchStore.getState();
-    search.setFrom(from);
-    search.setTo(to);
-    search.setQuery('');
-    search.setProductMode('transport');
-    search.saveRecentSearch();
-    pushPath('/(customer)/results');
-  };
-
-  const saveTrip = (id: string) => {
-    if (!user) {
-      pushPath('/(customer)/(tabs)/profile');
-      return;
-    }
-    if (useUserStore.getState().profile?.id !== user.id) useUserStore.setState({ profile: user });
-    toggleSavedTrip(id);
-  };
-
-  const categoryLoading =
+  // Per-tab status. Tours load inside their own panel.
+  const status =
     tab === 'hotels'
-      ? hotelsLoading
+      ? { loading: hotelsLoading, error: hotelsError, empty: hotels.length === 0, retry: refreshHotels }
       : tab === 'guides'
-        ? guidesLoading
+        ? { loading: guidesLoading, error: guidesError, empty: guides.length === 0, retry: refreshGuides }
         : tab === 'restaurants'
-          ? restosLoading
-          : toursLoading;
+          ? { loading: restosLoading, error: restosError, empty: restaurants.length === 0, retry: refreshRestos }
+          : null;
 
   return (
     <TravelDesignProvider>
@@ -200,11 +212,7 @@ export default function ExploreScreen() {
           name={user?.name}
           avatar={user?.avatar}
           unread={notifications.some((item) => !item.read)}
-          onSearch={() => {
-            setSearchVisible((visible) => !visible);
-            setQuery('');
-            scroll.current?.scrollTo({ y: 0, animated: true });
-          }}
+          onSearch={() => searchInput.current?.focus()}
           onNotifications={() => pushPath('/(customer)/(tabs)/notifications')}
           onProfile={() => pushPath('/(customer)/(tabs)/profile')}
         />
@@ -214,6 +222,9 @@ export default function ExploreScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={s.feed}
           keyboardDismissMode="on-drag"
+          // Like the website: search and filters stay at the top while the listings scroll.
+          // Children 0-2 are always rendered, so index 2 is always the filter bar.
+          stickyHeaderIndices={[2]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -223,80 +234,72 @@ export default function ExploreScreen() {
             />
           }
         >
+          <ExploreIntro />
           <ExploreServiceSelector value={tab} onChange={changeService} />
-          {searchVisible ? (
+          <View style={[s.filterBar, { backgroundColor: theme.background, borderBottomColor: theme.border }]}>
             <View style={s.search}>
               <TravelTextField
                 label="Search Explore"
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Vehicle, provider or destination"
+                placeholder={SEARCH_PLACEHOLDER[tab]}
                 icon="search-outline"
                 onSubmit={() => Keyboard.dismiss()}
+                inputRef={searchInput}
+                compact
               />
             </View>
-          ) : null}
-          <ExploreBanner service={tab} />
-          <ExploreRefineBar
-            service={tab}
-            value={refine}
-            onChange={setRefine}
-            resultCount={
-              tab === 'transport'
-                ? catalog.trips.length
-                : tab === 'hotels'
+            <ExploreRefineBar
+              service={tab}
+              value={refine}
+              onChange={setRefine}
+              resultCount={
+                tab === 'hotels'
                   ? catalog.hotels.length
                   : tab === 'guides'
                     ? catalog.guides.length
                     : tab === 'restaurants'
                       ? catalog.restaurants.length
                       : undefined
-            }
-          />
-          {tab === 'transport' ? (
-            <Pressable
-              onPress={() => setPicker('locating')}
-              style={({ pressed }) => [
-                s.nearMe,
-                { backgroundColor: theme.action, opacity: pressed ? 0.9 : 1 },
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Rides near me. Uses your location."
-            >
-              <Ionicons name="locate" size={18} color="#fff" />
-              <Text style={s.nearMeText}>Rides near me</Text>
-              <Text style={s.nearMeHint}>within 10 km</Text>
-            </Pressable>
-          ) : null}
-          {tab === 'transport' ? (
-            <ExploreTransportPanel
-              trips={catalog.trips}
-              loading={tripsLoading}
-              error={tripsError}
-              onRetry={() => void refreshTrips()}
-              onOpenRoute={openRoute}
-              savedIds={profile?.savedTripIds ?? []}
-              onSave={saveTrip}
-              onGuides={() => changeService('guides')}
+              }
             />
+          </View>
+          {status?.loading && status.empty ? (
+            <ListingSkeletons />
+          ) : status?.error && status.empty ? (
+            <View style={s.state}>
+              <EmptyState
+                title="Couldn't load listings"
+                message="Check your connection and try again."
+                actionLabel="Try again"
+                onAction={() => void status.retry()}
+              />
+            </View>
           ) : (
             <>
-              {categoryLoading ? (
-                <View style={s.loading}>
-                  <ActivityIndicator color={theme.primary} />
-                  <Text style={[s.loadingText, { color: theme.muted }]}>Refreshing listings…</Text>
-                </View>
-              ) : null}
               <ExplorePanels
                 tab={tab}
                 {...catalog}
                 query={query}
+                sort={refine.sort}
                 onSearchRestaurants={(city) => void searchByDestination(city)}
               />
-              <FloatingCrossSell tab={tab} {...catalog} />
+              <FloatingCrossSell tab={tab} {...catalog} onSwitchTab={changeService} />
             </>
           )}
+          <View style={s.cityToCity}>
+            <CityToCityEntry />
+          </View>
+          <ExplorePromo
+            onOpenRoads={roads.open}
+            onViewHunza={() => {
+              changeService('hotels');
+              setQuery('Hunza');
+            }}
+          />
+          <ExploreRoads onOpenRoads={roads.open} />
         </ScrollView>
+        {roads.sheet}
         <ExploreHelp />
         <ServicePickerSheet
           visible={picker !== null}
@@ -304,7 +307,8 @@ export default function ExploreScreen() {
           onClose={() => setPicker(null)}
           onPick={(next) => {
             setPicker(null);
-            changeService(next);
+            if (next === 'transport') pushPath(ALL_RIDES_MAP);
+            else changeService(next);
           }}
         />
       </View>
@@ -314,26 +318,17 @@ export default function ExploreScreen() {
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  feed: { paddingBottom: 88 },
-  search: { paddingHorizontal: 16, paddingBottom: 12 },
-  loading: {
-    padding: 16,
+  feed: { paddingBottom: 96 },
+  filterBar: { paddingTop: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  search: { paddingHorizontal: 16 },
+  cityToCity: { paddingHorizontal: 16, marginTop: 32 },
+  state: { paddingHorizontal: 16, paddingTop: 8 },
+  skeletonGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  loadingText: { fontFamily: Fonts.body, fontSize: 12 },
-  nearMe: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    minHeight: 48,
+    flexWrap: 'wrap',
+    gap: 12,
     paddingHorizontal: 16,
-    borderRadius: 999,
+    paddingTop: 8,
   },
-  nearMeText: { fontFamily: Fonts.bodySemiBold, fontSize: 15, color: '#fff' },
-  nearMeHint: { fontFamily: Fonts.body, fontSize: 13, color: 'rgba(255,255,255,0.85)', marginLeft: 'auto' },
+  skeletonCard: { width: '47%' },
 });

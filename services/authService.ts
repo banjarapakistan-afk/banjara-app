@@ -17,8 +17,15 @@ export async function login(credentials: AuthCredentials): Promise<AuthResult> {
     email: credentials.email.trim().toLowerCase(),
     password: credentials.password,
   });
+  const user = mapUser(data.user);
+  if (user.role === 'admin') {
+    // The app is for travellers and providers; admins use the admin portal. End the
+    // session the server just opened instead of keeping it.
+    await post('/auth/logout', { refreshToken: data.tokens.refreshToken }).catch(() => undefined);
+    throw new Error('Administrator accounts sign in on the BANJARA admin portal, not in the app.');
+  }
   return {
-    user: mapUser(data.user),
+    user,
     tokens: data.tokens,
   };
 }

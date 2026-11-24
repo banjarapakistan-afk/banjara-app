@@ -36,7 +36,7 @@ export function mapVehicleFromTrip(trip?: TripWithDetails | null): MapVehicleInf
     typeLabel: vehicleTypeLabel(trip.vehicleType),
     plate: trip.vehiclePlate,
     imageUrl: trip.vehicleImages?.[0] || trip.image,
-    phone: trip.agency.phone || undefined,
+    providerUserId: trip.agency.userId || undefined,
     agencyName: trip.agency.name,
     agencyLogo: trip.agency.logo || undefined,
     rating: trip.agency.rating || trip.rating,

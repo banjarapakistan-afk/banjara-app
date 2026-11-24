@@ -9,8 +9,7 @@ import { useHotelDetails } from '@/hooks/useHotelDetails';
 import { useHotelStore } from '@/store/hotelStore';
 import { paramId, pushPath, safeBack } from '@/utils/navigation';
 import { hotelMapUrl } from '@/utils/hotelPresentation';
-import { publicEmail, publicPhone } from '@/utils/publicContact';
-import { publicWebsite } from '@/utils/providerDetails';
+import { openProviderChatByProfileId } from '@/utils/providerChat';
 
 export default function HotelDetailsScreen() {
   const params = useLocalSearchParams<{ id: string | string[] }>();
@@ -38,12 +37,7 @@ export default function HotelDetailsScreen() {
   const open = (url: string, message: string) => {
     void Linking.openURL(url).catch(() => Alert.alert('Could not open this action', message));
   };
-  const phone = publicPhone(hotel.phone);
-  const landline = publicPhone(hotel.landline);
-  const email = publicEmail(hotel.email);
-  const website = publicWebsite(hotel.website);
-  const call = (number: string) => () =>
-    open(`tel:${number}`, 'Please try the dialer on a supported device.');
+  const providerId = hotel.providerId;
 
   return (
     <HotelDetailsPresentation
@@ -54,14 +48,7 @@ export default function HotelDetailsScreen() {
       onBack={onBack}
       onProfile={onProfile}
       onMap={() => open(hotelMapUrl(hotel), 'Please try opening the property location again.')}
-      onCall={phone ? call(phone) : undefined}
-      onLandline={landline ? call(landline) : undefined}
-      onEmail={
-        email ? () => open(email, 'Please use a device with an email app configured.') : undefined
-      }
-      onWebsite={
-        website ? () => open(website, 'Please try opening the property website again.') : undefined
-      }
+      onMessage={providerId ? () => void openProviderChatByProfileId(providerId) : undefined}
       onSelectRoom={() => {
         setHotel(hotel);
         pushPath(`/(customer)/hotels/rooms/${hotel.id}`);

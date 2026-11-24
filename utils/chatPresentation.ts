@@ -38,6 +38,8 @@ export type ChatBookingContext = {
   status?: string;
   detailHref: string;
   ticketHref?: string;
+  /** Provider phone — the API only sends it for a confirmed booking inside the contact window. */
+  providerPhone?: string;
 };
 
 /** Display only the linked record returned by the authorized booking endpoint. */
@@ -86,5 +88,9 @@ export function chatBookingContext(
         ? `/(customer)/hotels/booking-details/${id}`
         : '/(customer)/(tabs)/bookings',
     ticketHref: ticketReady ? `/(customer)/ticket/${id}` : undefined,
+    providerPhone:
+      typeof raw.providerPhone === 'string' && raw.providerPhone.trim()
+        ? raw.providerPhone.trim()
+        : undefined,
   };
 }

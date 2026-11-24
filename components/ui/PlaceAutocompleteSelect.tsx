@@ -99,20 +99,27 @@ export function PlaceAutocompleteSelect({
       return;
     }
     setSearching(true);
+    // Ignore answers to older keystrokes: a slow "Isl" must never replace "Islamabad".
+    let current = true;
     timer.current = setTimeout(() => {
       void locationService
         .searchPlaces(q, 8)
         .then((data) => {
+          if (!current) return;
           setResults(data);
-          setError(data.length ? null : 'No places found. Try another spelling.');
+          setError(data.length ? null : 'No places found. Try another spelling, or pin it on the map.');
         })
         .catch((err) => {
+          if (!current) return;
           setResults([]);
           setError(getApiErrorMessage(err));
         })
-        .finally(() => setSearching(false));
-    }, 400);
+        .finally(() => {
+          if (current) setSearching(false);
+        });
+    }, 350);
     return () => {
+      current = false;
       if (timer.current) clearTimeout(timer.current);
     };
   }, [query, open]);

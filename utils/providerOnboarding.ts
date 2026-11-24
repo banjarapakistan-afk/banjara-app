@@ -18,11 +18,8 @@ export function transportStepHref(step: TransportStep): Href {
       pathname: '/(provider)/location',
       params: { mode: 'onboarding' },
     } as Href;
-  if (step === 'vehicle')
-    return {
-      pathname: '/(provider)/vehicles/add',
-      params: { mode: 'onboarding' },
-    } as Href;
+  // Vehicle details and the vehicle record are one signup screen now.
+  if (step === 'vehicle') return '/(provider)/register/transport' as Href;
   if (step === 'submitted') return '/(provider)/status';
   return `/(provider)/register/${step}` as Href;
 }

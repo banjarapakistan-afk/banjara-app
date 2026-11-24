@@ -1,6 +1,6 @@
 import { createURL } from 'expo-linking';
 import { useLocalSearchParams } from 'expo-router';
-import { Alert, Linking, Share } from 'react-native';
+import { Alert, Share } from 'react-native';
 import {
   RestaurantDetailsFrame,
   RestaurantDetailsPresentation,
@@ -10,7 +10,7 @@ import { useProviderFavorite } from '@/hooks/useProviderFavorite';
 import { useRestaurant } from '@/hooks/useRestaurants';
 import { getApiErrorMessage } from '@/services/apiError';
 import { paramId, safeBack } from '@/utils/navigation';
-import { restaurantPhone, restaurantWebsite } from '@/utils/restaurantPresentation';
+import { openProviderChatByProfileId } from '@/utils/providerChat';
 
 export default function RestaurantProfileScreen() {
   const params = useLocalSearchParams<{ id: string | string[] }>();
@@ -34,13 +34,7 @@ export default function RestaurantProfileScreen() {
       </RestaurantDetailsFrame>
     );
 
-  const phone = restaurantPhone(restaurant.phone);
-  const website = restaurantWebsite(restaurant.website);
-  const open = (url: string, label: string) => {
-    void Linking.openURL(url).catch(() =>
-      Alert.alert(label, 'Please try again on a device that supports this action.'),
-    );
-  };
+  const providerId = restaurant.providerId;
   const onShare = () => {
     void Share.share({
       message: `${restaurant.name}${restaurant.city ? ` · ${restaurant.city}` : ''}\n${createURL(`/restaurants/${id}`)}`,
@@ -62,8 +56,7 @@ export default function RestaurantProfileScreen() {
           .toggle()
           .catch((error) => Alert.alert('Could not save restaurant', getApiErrorMessage(error)))
       }
-      onCall={phone ? () => open(`tel:${phone}`, 'Could not open the dialer') : undefined}
-      onWebsite={website ? () => open(website, 'Could not open the website') : undefined}
+      onMessage={providerId ? () => void openProviderChatByProfileId(providerId) : undefined}
     />
   );
 }

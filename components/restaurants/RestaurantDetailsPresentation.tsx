@@ -88,8 +88,7 @@ export function RestaurantDetailsPresentation({
   onShare,
   onSave,
   onRefresh,
-  onCall,
-  onWebsite,
+  onMessage,
 }: {
   restaurant: Restaurant;
   saved: boolean;
@@ -99,8 +98,8 @@ export function RestaurantDetailsPresentation({
   onShare: () => void;
   onSave: () => void;
   onRefresh: () => void;
-  onCall?: () => void;
-  onWebsite?: () => void;
+  /** Opens the in-app chat with the restaurant's provider. */
+  onMessage?: () => void;
 }) {
   const theme = useHomeDesign();
   const insets = useSafeAreaInsets();
@@ -284,26 +283,20 @@ export function RestaurantDetailsPresentation({
               </View>
             ) : null}
 
-            {onCall || onWebsite ? (
+            {onMessage ? (
               <View style={s.actions}>
-                {onCall ? (
-                  <Button
-                    title={`Call restaurant (${restaurant.phone})`}
-                    onPress={onCall}
-                    icon={<Ionicons name="call-outline" size={18} color={theme.background} />}
-                    style={{ minHeight: 50 }}
-                  />
-                ) : null}
-                {onWebsite ? (
-                  <Button
-                    title="Visit website"
-                    variant="outline"
-                    onPress={onWebsite}
-                    textColor={theme.text}
-                    icon={<Ionicons name="globe-outline" size={19} color={theme.text} />}
-                    style={{ minHeight: 50 }}
-                  />
-                ) : null}
+                <Button
+                  title="Message"
+                  onPress={onMessage}
+                  icon={
+                    <Ionicons
+                      name="chatbubble-ellipses-outline"
+                      size={18}
+                      color={theme.background}
+                    />
+                  }
+                  style={{ minHeight: 50 }}
+                />
               </View>
             ) : null}
           </View>

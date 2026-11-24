@@ -18,11 +18,15 @@ import { destinationImageFor, POPULAR_DESTINATIONS } from '@/constants/destinati
 import { SERVICE_CATEGORIES, type HomeServiceCategory } from '@/constants/productModes';
 import { useHomeDesign } from '@/constants/homeDesign';
 import { Fonts } from '@/constants/typography';
+import { STAR_GOLD } from '@/constants/colors';
 import type { TripWithDetails } from '@/types/trip';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate } from '@/utils/formatDate';
 import { formatDuration, formatTime } from '@/utils/formatTime';
 import { normalizeMediaUrl } from '@/utils/mediaUrl';
+import { router } from 'expo-router';
+import { useAuthStore } from '@/store/authStore';
+import { getHomeHref } from '@/utils/routing';
 
 export function HomeTopBar({
   name,
@@ -31,6 +35,8 @@ export function HomeTopBar({
   onSearch,
   onNotifications,
   onProfile,
+  signedIn = true,
+  onLogin,
 }: {
   name?: string;
   avatar?: string;
@@ -38,9 +44,15 @@ export function HomeTopBar({
   onSearch: () => void;
   onNotifications: () => void;
   onProfile: () => void;
+  /** Guests see a Log in button in place of their avatar. */
+  signedIn?: boolean;
+  onLogin?: () => void;
 }) {
   const theme = useHomeDesign();
   const insets = useSafeAreaInsets();
+  const user = useAuthStore((state) => state.user);
+  // Provider accounts don't use traveller screens: one clear way back to their area.
+  const isProvider = user?.role === 'provider';
   return (
     <View
       style={[
@@ -64,14 +76,37 @@ export function HomeTopBar({
           onPress={onNotifications}
           badge={unread}
         />
-        <Pressable
-          style={s.profile}
-          onPress={onProfile}
-          accessibilityRole="button"
-          accessibilityLabel="Your profile"
-        >
-          <Avatar name={name ?? 'Traveler'} uri={avatar} size={32} />
-        </Pressable>
+        {isProvider ? (
+          <Pressable
+            style={({ pressed }) => [s.login, s.dashboard, { backgroundColor: theme.action, opacity: pressed ? 0.85 : 1 }]}
+            onPress={() => router.replace(getHomeHref(user))}
+            accessibilityRole="button"
+            accessibilityLabel="Back to my dashboard"
+            hitSlop={6}
+          >
+            <Ionicons name="grid-outline" size={14} color="#FFFFFF" />
+            <Text style={s.loginText}>Dashboard</Text>
+          </Pressable>
+        ) : signedIn ? (
+          <Pressable
+            style={s.profile}
+            onPress={onProfile}
+            accessibilityRole="button"
+            accessibilityLabel="Your profile"
+          >
+            <Avatar name={name ?? 'Traveler'} uri={avatar} size={32} />
+          </Pressable>
+        ) : (
+          <Pressable
+            style={({ pressed }) => [s.login, { backgroundColor: theme.action, opacity: pressed ? 0.85 : 1 }]}
+            onPress={onLogin}
+            accessibilityRole="button"
+            accessibilityLabel="Log in"
+            hitSlop={6}
+          >
+            <Text style={s.loginText}>Log in</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -89,22 +124,20 @@ export function HomeHighlights({
   const groups: StoryGroup[] = [
     {
       id: 'road-updates',
-      label: 'Road updates',
+      label: 'Road tips',
       image: destinationImageFor('Hunza'),
-      cta: 'See road updates',
+      cta: 'See road tips',
       onAction: onNotifications,
       slides: [
         {
           video: require('@/assets/stories/4283.mp4'),
           place: 'Karakoram Highway',
-          posted: '2h ago',
-          caption: 'KKH is open end to end today. Expect short stops near Dasu for road work.',
+          caption: 'Ask your driver about the KKH before you set off. Road work can mean short stops near Dasu.',
         },
         {
           video: require('@/assets/stories/50267.mp4'),
           place: 'Babusar Top',
-          posted: '5h ago',
-          caption: 'Babusar Pass is clear for jeeps and cars until 4 pm. Start early.',
+          caption: 'Babusar Pass usually opens in summer only. Cross early in the day.',
         },
       ],
     },
@@ -119,13 +152,11 @@ export function HomeHighlights({
         {
           video: require('@/assets/stories/41576.mp4'),
           place: 'Islamabad → Hunza',
-          posted: '1h ago',
-          caption: 'Seats from Rs 6,500 on today’s coaster departures. Compare and book in seconds.',
+          caption: 'Compare seat and whole-vehicle fares across every published departure.',
         },
         {
           video: require('@/assets/stories/3352.mp4'),
           place: 'Deosai Plains',
-          posted: '3h ago',
           caption: 'Charter a whole Land Cruiser with a local driver. Your route, your pace.',
         },
       ],
@@ -140,19 +171,16 @@ export function HomeHighlights({
         {
           video: require('@/assets/stories/4132.mp4'),
           place: 'Hunza Valley',
-          posted: '3h ago',
-          caption: 'Storm clouds and sunshine over the peaks this week. Perfect for photos.',
+          caption: 'Hunza is at its best in spring blossom and autumn colour.',
         },
         {
           video: require('@/assets/stories/51791.mp4'),
           place: 'Fairy Meadows',
-          posted: '8h ago',
-          caption: 'Clear views of Nanga Parbat from the meadows this morning.',
+          caption: 'Wake up to views of Nanga Parbat from the meadows.',
         },
         {
           video: require('@/assets/stories/46384.mp4'),
           place: 'Skardu',
-          posted: '1d ago',
           caption: 'Hidden waterfalls on the road to Shigar, an easy half-day trip.',
         },
       ],
@@ -167,35 +195,31 @@ export function HomeHighlights({
         {
           video: require('@/assets/stories/2385.mp4'),
           place: 'Passu',
-          posted: '4h ago',
           caption: 'Our guides know every trail, viewpoint and tea stop in the valley.',
         },
         {
           video: require('@/assets/stories/5360.mp4'),
           place: 'Nagar',
-          posted: '1d ago',
           caption: 'Book a verified local guide for treks, jeep safaris and village walks.',
         },
       ],
     },
     {
       id: 'snow-season',
-      label: 'Travel alerts',
+      label: 'Season tips',
       icon: 'snow-outline',
-      cta: 'See all alerts',
+      cta: 'See travel tips',
       onAction: onNotifications,
       slides: [
         {
           video: require('@/assets/stories/4695.mp4'),
           place: 'Khunjerab Pass',
-          posted: '6h ago',
-          caption: 'First snowfall at Khunjerab. Carry warm layers above 4,000 m.',
+          caption: 'Khunjerab sits above 4,600 m. Carry warm layers, even in summer.',
         },
         {
           video: require('@/assets/stories/3371.mp4'),
           place: 'Naltar',
-          posted: '1d ago',
-          caption: 'Naltar forest roads need chains after fresh snow. Check before you go.',
+          caption: 'Naltar roads can need snow chains in winter. Check with your driver.',
         },
       ],
     },
@@ -573,12 +597,23 @@ export function HomeRideCard({
             <MaterialIcons name="verified" size={15} color={theme.primary} />
           ) : null}
         </View>
-        <View style={[s.tripRating, { backgroundColor: theme.field }]}>
-          <Text style={{ color: '#ff6b6b', fontSize: 11 }}>★</Text>
-          <Text style={[s.tripRatingText, { color: theme.text }]}>
-            {hasReviews ? (trip.rating || trip.agency.rating || 0).toFixed(1) : 'New'}
-          </Text>
-        </View>
+        {/* A star next to "New" reads like a bad rating; stars only when there are reviews. */}
+        {hasReviews ? (
+          <View
+            style={[s.tripRating, { backgroundColor: theme.field }]}
+            accessibilityLabel={`Rated ${(trip.rating || trip.agency.rating || 0).toFixed(1)} out of 5 from ${trip.agency.reviewCount} reviews`}
+          >
+            <Text style={{ color: STAR_GOLD, fontSize: 11 }}>★</Text>
+            <Text style={[s.tripRatingText, { color: theme.text }]}>
+              {(trip.rating || trip.agency.rating || 0).toFixed(1)}
+              <Text style={{ color: theme.muted }}> ({trip.agency.reviewCount})</Text>
+            </Text>
+          </View>
+        ) : (
+          <View style={[s.tripRating, { backgroundColor: theme.soft }]}>
+            <Text style={[s.tripRatingText, { color: theme.primary }]}>New on Banjara</Text>
+          </View>
+        )}
       </View>
 
       <View style={[s.tripFooter, { backgroundColor: theme.field }]}>
@@ -668,97 +703,6 @@ export function HomeDestinationCards({
   );
 }
 
-/** Provider-published trips fill the editorial feed until a traveler-post API exists. */
-export function HomeInspiration({
-  trips,
-  savedIds,
-  onSave,
-  onOpen,
-}: {
-  trips: TripWithDetails[];
-  savedIds: string[];
-  onSave: (id: string) => void;
-  onOpen: (trip: TripWithDetails) => void;
-}) {
-  const theme = useHomeDesign();
-  const seen = new Set<string>();
-  const stories = trips
-    .filter((trip) => {
-      if (seen.has(trip.agencyId)) return false;
-      seen.add(trip.agencyId);
-      return true;
-    })
-    .slice(0, 2);
-  if (!stories.length) return null;
-  return (
-    <TravelSection
-      title="Travel inspiration"
-      subtitle="Discover journeys from our travel providers"
-    >
-      <View style={s.storyStack}>
-        {stories.map((trip) => (
-          <TravelSurface key={trip.id}>
-            <Pressable
-              onPress={() => onOpen(trip)}
-              accessibilityRole="button"
-              accessibilityLabel={`Explore ${trip.agency.name}'s trip`}
-              style={s.storyHead}
-            >
-              <Avatar name={trip.agency.name} uri={trip.agency.logo} size={34} />
-              <View style={s.flex}>
-                <Text style={[s.providerName, { color: theme.text }]}>{trip.agency.name}</Text>
-                <Text style={[s.small, { color: theme.muted }]}>
-                  {trip.from} → {trip.to}
-                </Text>
-              </View>
-              <Ionicons name="arrow-forward" size={19} color={theme.muted} />
-            </Pressable>
-            <Pressable
-              onPress={() => onOpen(trip)}
-              accessibilityRole="button"
-              accessibilityLabel={`View trip to ${trip.to}`}
-            >
-              <Image
-                source={{
-                  uri:
-                    normalizeMediaUrl(trip.image || trip.vehicleImages?.[0]) ||
-                    destinationImageFor(trip.to),
-                }}
-                style={s.storyImage}
-                contentFit="cover"
-              />
-            </Pressable>
-            <View style={s.storyActions}>
-              <TravelIconAction
-                icon={savedIds.includes(trip.id) ? 'heart' : 'heart-outline'}
-                label={savedIds.includes(trip.id) ? 'Unsave ride' : 'Save ride'}
-                onPress={() => onSave(trip.id)}
-                color={theme.coral}
-              />
-              <Pressable
-                onPress={() => onOpen(trip)}
-                accessibilityRole="button"
-                style={s.storyDetails}
-              >
-                <Text style={[s.small, { color: theme.primary }]}>Explore this journey</Text>
-              </Pressable>
-              <TravelIconAction
-                icon={savedIds.includes(trip.id) ? 'bookmark' : 'bookmark-outline'}
-                label="Save this journey"
-                onPress={() => onSave(trip.id)}
-              />
-            </View>
-            <View style={[s.storyChip, { backgroundColor: theme.field }]}>
-              <Ionicons name="bus-outline" size={14} color={theme.primary} />
-              <Text style={[s.small, { color: theme.muted }]}>Published by {trip.agency.name}</Text>
-            </View>
-          </TravelSurface>
-        ))}
-      </View>
-    </TravelSection>
-  );
-}
-
 export function HomeBenefits() {
   const theme = useHomeDesign();
   const benefits: Array<{ icon: TravelIcon; title: string; text: string; coral?: boolean }> = [
@@ -839,17 +783,9 @@ const s = StyleSheet.create({
   brand: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   wordmark: { fontFamily: Fonts.displayBold, fontSize: 19, letterSpacing: -0.5 },
   profile: { width: 40, height: 44, justifyContent: 'center', alignItems: 'flex-end' },
-  highlights: { paddingHorizontal: 12, paddingTop: 14, paddingBottom: 8, gap: 10 },
-  highlight: { width: 70, alignItems: 'center', gap: 6 },
-  highlightRing: { width: 60, height: 60, borderRadius: 30, borderWidth: 1.6, padding: 3 },
-  highlightInner: {
-    flex: 1,
-    borderRadius: 28,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  highlightLabel: { fontFamily: Fonts.bodyMedium, fontSize: 10 },
+  login: { marginLeft: 6, paddingHorizontal: 16, height: 34, borderRadius: 17, justifyContent: 'center' },
+  dashboard: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  loginText: { fontFamily: Fonts.bodyBold, fontSize: 13.5, color: '#FFFFFF' },
   services: { paddingHorizontal: 16, gap: 14, paddingBottom: 14 },
   service: {
     width: 66,
@@ -985,7 +921,6 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  providerName: { fontFamily: Fonts.display, fontSize: 16, lineHeight: 20, flexShrink: 1 },
   duration: { fontFamily: Fonts.bodySemiBold, fontSize: 10 },
   price: { fontFamily: Fonts.displayBold, fontSize: 17 },
   book: {
@@ -1014,23 +949,6 @@ const s = StyleSheet.create({
   destinationCopy: { gap: 3 },
   destinationName: { fontFamily: Fonts.display, fontSize: 17, color: 'rgb(255, 255, 255)' },
   destinationSubtitle: { fontFamily: Fonts.body, fontSize: 10, color: 'rgb(255, 255, 255)' },
-  storyStack: { paddingHorizontal: 16, gap: 16 },
-  storyHead: { padding: 14, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  storyImage: { width: '100%', aspectRatio: 1.4 },
-  storyActions: { paddingHorizontal: 6, flexDirection: 'row', alignItems: 'center' },
-  storyDetails: { flex: 1, minHeight: 44, justifyContent: 'center' },
-  storyChip: {
-    alignSelf: 'flex-start',
-    maxWidth: '90%',
-    marginHorizontal: 14,
-    marginBottom: 16,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
   benefits: { marginHorizontal: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   benefit: { flexBasis: '46%', flexGrow: 1, padding: 16, gap: 7, minHeight: 148 },
   benefitIcon: {

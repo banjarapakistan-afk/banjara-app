@@ -43,7 +43,6 @@ type Props = {
   onBack: () => void;
   onProfile: () => void;
   onShare: () => void;
-  onCall?: () => void;
   onMessage?: () => void;
   onTrip: (trip: TripWithDetails) => void;
 };
@@ -94,7 +93,6 @@ function TransportAgencyContent({
   onBack,
   onProfile,
   onShare,
-  onCall,
   onMessage,
   onTrip,
 }: Props) {
@@ -199,25 +197,17 @@ function TransportAgencyContent({
             />
             <AgencyStat icon="navigate-outline" value={String(network.length)} label="Routes" />
           </View>
-          <View style={s.actions}>
-            <Button
-              title="Call driver"
-              variant="secondary"
-              disabled={!onCall}
-              onPress={onCall}
-              fullWidth={false}
-              style={s.action}
-              icon={<Ionicons name="call-outline" size={17} color={theme.primary} />}
-            />
-            <Button
-              title="Message"
-              disabled={!onMessage}
-              onPress={onMessage}
-              fullWidth={false}
-              style={s.action}
-              icon={<Ionicons name="chatbox-outline" size={17} color={theme.background} />}
-            />
-          </View>
+          {onMessage ? (
+            <View style={s.actions}>
+              <Button
+                title="Message"
+                onPress={onMessage}
+                fullWidth={false}
+                style={s.action}
+                icon={<Ionicons name="chatbox-outline" size={17} color={theme.background} />}
+              />
+            </View>
+          ) : null}
         </AgencyPanel>
 
         <View style={s.section}>
@@ -445,7 +435,7 @@ function TransportAgencyContent({
           dropoffs={transport?.dropoffLocations ?? []}
           previewTrip={trips.find((trip) => trip.originCoordinates && trip.destinationCoordinates)}
         />
-        <ContactCard agency={agency} provider={provider} />
+        <ContactCard agency={agency} provider={provider} onMessage={onMessage} />
         <AgencySectionTitle title="Reviews" />
         {reviews.length ? (
           reviews.map((review) => <TripReviewCard key={review.id} review={review} />)

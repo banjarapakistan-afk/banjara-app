@@ -1,32 +1,30 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '@/components/ui/Button';
+import { DatePickerModal } from '@/components/ui/DatePickerModal';
 import { Header } from '@/components/ui/Header';
 import { ImagePickerField } from '@/components/ui/ImagePickerField';
-import { LocationPinField } from '@/components/location/LocationPinField';
 import { Input } from '@/components/ui/Input';
-import {
-  GUIDE_DOCUMENT_TYPE_OPTIONS,
-  GUIDE_ONBOARDING_STEPS,
-  GUIDE_PHOTO_CATEGORY_OPTIONS,
-  GUIDE_PRICING_TYPE_OPTIONS,
-  GUIDE_TYPE_OPTIONS,
-  GUIDE_AREA_SUGGESTIONS,
-  LANGUAGE_PROFICIENCY_OPTIONS,
-  WEEKDAY_LABELS,
-} from '@/constants/guideOptions';
+import { PlaceAutocompleteSelect } from '@/components/ui/PlaceAutocompleteSelect';
+import { Chips, Counted, Section, Tags } from '@/components/provider/SignupBits';
 import { Colors } from '@/constants/colors';
+import { GUIDE_TYPE_OPTIONS, WEEKDAY_LABELS } from '@/constants/guideOptions';
 import { Radius, Spacing } from '@/constants/spacing';
+import { TRIP_CITY_OPTIONS } from '@/constants/tripPlaces';
 import { Fonts, Typography } from '@/constants/typography';
 import { getApiErrorMessage } from '@/services/apiError';
 import * as guideService from '@/services/guideService';
@@ -36,14 +34,15 @@ import { useProviderStore } from '@/store/providerStore';
 import type {
   GuideDetails,
   GuideDocument,
+  GuideDocumentType,
   GuideLanguage,
   GuideOfferedService,
-  GuidePhoto,
+  GuidePricingType,
   GuideType,
   LanguageProficiency,
   Weekday,
 } from '@/types/guide';
-import { emptyGuideDetails, newGuideId, splitCommaList } from '@/utils/guideDraft';
+import { defaultGuideAvailability, emptyGuideDetails, newGuideId } from '@/utils/guideDraft';
 import {
   ONBOARDING_LOCATION,
   PROVIDER_SERVICE_TAB,
@@ -52,48 +51,153 @@ import {
   useWizardBack,
   wizardBack,
 } from '@/utils/navigation';
-import { formatCurrency } from '@/utils/formatCurrency';
 
-const TOTAL_STEPS = GUIDE_ONBOARDING_STEPS.length;
+/* ------------------------------------------------------------------ */
+/* Steps: the same four tabs as the website (CNIC and Review follow).  */
+/* ------------------------------------------------------------------ */
 
-function ProgressBar({ step }: { step: number }) {
-  return (
-    <View style={styles.progressWrap}>
-      <Text style={styles.progressText}>
-        Step {step} of {TOTAL_STEPS} · {GUIDE_ONBOARDING_STEPS[step - 1]}
-      </Text>
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${(step / TOTAL_STEPS) * 100}%` }]} />
-      </View>
-    </View>
-  );
+const STEPS = ['profile', 'services', 'schedule', 'photos'] as const;
+type Step = (typeof STEPS)[number];
+const STEP_LABELS: Record<Step, string> = {
+  profile: 'Profile',
+  services: 'Services',
+  schedule: 'Availability',
+  photos: 'Photos',
+};
+const TITLES: Record<Step, string> = {
+  profile: 'Your guide profile',
+  services: 'Services & prices',
+  schedule: 'When you’re available',
+  photos: 'Photos & documents',
+};
+const SUBTITLES: Record<Step, string> = {
+  profile: 'This is what travellers read before they hire you. A clear photo and a friendly bio make the biggest difference.',
+  services: 'Add what travellers can book — a city walk, a day trek, a photo tour. Or just set a daily rate.',
+  schedule: 'Travellers can only book you on these days and hours. You can change them any time.',
+  photos: 'Photos of your trips help travellers picture the day. Certificates are optional but earn trust.',
+};
+/** Old dashboard links used the 9-step numbers (6 = services, 7 = availability). */
+const LEGACY_STEP: Record<string, Step> = { '1': 'profile', '3': 'profile', '4': 'profile', '5': 'photos', '6': 'services', '7': 'schedule', '8': 'photos' };
+
+const AREAS = ['Hunza', 'Gilgit', 'Skardu', 'Nagar', 'Fairy Meadows', 'Naltar', 'Khunjerab', 'Ghizer', 'Astore', 'Chitral', 'Swat', 'Naran'];
+const LANGUAGES = ['Urdu', 'English', 'Burushaski', 'Shina', 'Wakhi', 'Balti', 'Khowar', 'Pashto', 'Punjabi', 'Chinese'];
+const LEVELS: { value: LanguageProficiency; label: string }[] = [
+  { value: 'basic', label: 'Basic' },
+  { value: 'conversational', label: 'Good' },
+  { value: 'fluent', label: 'Fluent' },
+  { value: 'native', label: 'Native' },
+];
+const PRICING: { value: GuidePricingType; label: string; sub: string }[] = [
+  { value: 'per_person', label: 'Per person', sub: 'Each traveller pays' },
+  { value: 'per_group', label: 'Per group', sub: 'One price for the group' },
+  { value: 'per_day', label: 'Per day', sub: 'A fixed price each day' },
+  { value: 'per_hour', label: 'Per hour', sub: 'Charged by the hour' },
+];
+const PRICING_SHORT: Record<string, string> = { per_person: 'per person', per_group: 'per group', per_day: 'per day', per_hour: 'per hour', custom: '' };
+const DURATIONS = [
+  { label: '2 hours', hours: 2 },
+  { label: 'Half day', hours: 4 },
+  { label: 'Full day', hours: 8 },
+  { label: '2 days', hours: 16 },
+  { label: '3+ days', hours: 24 },
+];
+const NOTICE = [
+  { hours: 0, label: 'Same day' },
+  { hours: 12, label: '12 hours' },
+  { hours: 24, label: '1 day' },
+  { hours: 48, label: '2 days' },
+];
+const DOCS: { type: GuideDocumentType; label: string; hint: string }[] = [
+  { type: 'guide_license', label: 'Guide licence', hint: 'From the tourism department' },
+  { type: 'tourism_cert', label: 'Tourism certificate', hint: 'Courses or training you’ve done' },
+  { type: 'first_aid', label: 'First aid', hint: 'Any first-aid card or certificate' },
+];
+const WEEK: Weekday[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const TYPE_LABEL = Object.fromEntries(GUIDE_TYPE_OPTIONS.map((t) => [t.value, t.label])) as Record<string, string>;
+const MAX_PHOTOS = 12;
+
+const isTime = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+const rupees = (value: number) => `Rs ${Math.round(value).toLocaleString('en-PK')}`;
+const validPhone = (value?: string) => /^\+?\d{10,15}$/.test((value ?? '').replace(/[\s()-]/g, ''));
+
+/* What each tab needs — the same rules as the website. */
+function profileMissing(d: GuideDetails): string[] {
+  const missing: string[] = [];
+  if (!d.fullName?.trim()) missing.push('your name');
+  if (!validPhone(d.phone)) missing.push('a valid phone number');
+  if (!d.profilePhoto) missing.push('a profile photo');
+  if (!d.guideTypes?.length) missing.push('the kind of guiding you do');
+  if (!d.areasCovered?.length) missing.push('areas you cover');
+  if (!d.languages?.some((l) => l.language.trim())) missing.push('languages you speak');
+  if ((d.shortBio ?? '').trim().length < 30) missing.push('a short bio (30+ characters)');
+  return missing;
 }
+function servicesMissing(d: GuideDetails): string[] {
+  return (d.services ?? []).some((s) => s.active !== false) || (d.dailyHireRate ?? 0) > 0 ? [] : ['at least one service or a daily rate'];
+}
+function scheduleMissing(d: GuideDetails): string[] {
+  const days = (d.availability?.weekly ?? []).filter((day) => day.enabled);
+  if (!days.length) return ['at least one day you can guide'];
+  const bad = days.find((day) => !isTime(day.startTime) || !isTime(day.endTime) || day.endTime <= day.startTime);
+  return bad ? [`valid hours for ${WEEKDAY_LABELS[bad.day]} (e.g. 09:00 to 18:00)`] : [];
+}
+const MISSING: Record<Step, (d: GuideDetails) => string[]> = {
+  profile: profileMissing,
+  services: servicesMissing,
+  schedule: scheduleMissing,
+  photos: () => [],
+};
 
-function ChipSelect({
-  options,
-  selected,
-  onToggle,
-}: {
-  options: { value: string; label: string }[];
-  selected: string[];
-  onToggle: (value: string) => void;
-}) {
-  return (
-    <View style={styles.chipGrid}>
-      {options.map((opt) => {
-        const active = selected.includes(opt.value);
-        return (
-          <Pressable
-            key={opt.value}
-            onPress={() => onToggle(opt.value)}
-            style={[styles.chip, active && styles.chipActive]}
-          >
-            <Text style={[styles.chipText, active && styles.chipTextActive]}>{opt.label}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
+/* ------------------------------------------------------------------ */
+/* Screen                                                              */
+/* ------------------------------------------------------------------ */
+
+type ServiceDraft = {
+  id?: string;
+  name: string;
+  /** Kept from a saved service; new services use the type chosen on the profile step. */
+  category?: GuideType;
+  description: string;
+  durationLabel: string;
+  durationHours?: number;
+  price: string;
+  pricingType: GuidePricingType;
+  maxGuests: string;
+  included: string[];
+};
+const blankService = (): ServiceDraft => ({
+  name: '',
+  description: '',
+  durationLabel: 'Full day',
+  durationHours: 8,
+  price: '',
+  pricingType: 'per_person',
+  maxGuests: '8',
+  included: [],
+});
+
+/** Words for one-tap service names, from the guide's own types ("Hunza day tour", "Nagar trek"). */
+const NAME_WORD: Record<GuideType, string> = {
+  local: 'day tour',
+  tour: 'guided tour',
+  trekking: 'trek',
+  hiking: 'hike',
+  cultural: 'culture & history walk',
+  adventure: 'adventure day',
+  mountain: 'mountain expedition',
+  photography: 'photo tour',
+  other: 'tour',
+};
+const INCLUDED_IDEAS = ['Entry tickets', 'Tea & snacks', 'Lunch', 'Transport', 'Photos of your trip', 'Trekking poles'];
+
+function nameIdeas(d: GuideDetails) {
+  const taken = (d.services ?? []).map((s) => s.name.toLowerCase());
+  const areas = (d.areasCovered ?? []).slice(0, 3);
+  const types = (d.guideTypes?.length ? d.guideTypes : (['local'] as GuideType[])).slice(0, 2);
+  return areas
+    .flatMap((area) => types.map((t) => `${area} ${NAME_WORD[t]}`))
+    .filter((idea) => !taken.includes(idea.toLowerCase()))
+    .slice(0, 4);
 }
 
 export default function GuideOnboardingScreen() {
@@ -101,10 +205,10 @@ export default function GuideOnboardingScreen() {
   const user = useAuthStore((s) => s.user);
   const params = useLocalSearchParams<{ from?: string | string[]; step?: string | string[] }>();
   const isEditing = paramId(params.from) === 'edit';
-  const initialStep = Math.min(
-    TOTAL_STEPS,
-    Math.max(1, Number(paramId(params.step) || '1') || 1)
-  );
+  const requested = paramId(params.step);
+  const initialStep: Step = (STEPS as readonly string[]).includes(requested)
+    ? (requested as Step)
+    : LEGACY_STEP[requested] ?? 'profile';
 
   const draft = useProviderStore((s) => s.draft);
   const provider = useProviderStore((s) => s.provider);
@@ -112,74 +216,63 @@ export default function GuideOnboardingScreen() {
   const saveProgress = useProviderStore((s) => s.saveProgress);
   const setProvider = useProviderStore((s) => s.setProvider);
 
-  const [removingImage, setRemovingImage] = useState(false);
-  const [step, setStep] = useState(initialStep);
+  const [step, setStep] = useState<Step>(initialStep);
   const [details, setDetails] = useState<GuideDetails>(() =>
     emptyGuideDetails({
-      fullName: draft.business.ownerName ?? draft.business.businessName ?? draft.personal.name,
-      phone: draft.business.phone ?? draft.personal.phone,
-      email: draft.business.email ?? draft.personal.email,
-      city: draft.location?.address.city ?? draft.business.city,
-      country: draft.location?.address.country ?? 'Pakistan',
-    })
+      fullName: draft.business.ownerName || draft.personal.name || user?.name,
+      phone: draft.business.phone || draft.personal.phone || user?.phone,
+      email: draft.business.email || draft.personal.email || user?.email,
+      city: draft.location?.address.city || draft.business.city,
+      country: 'Pakistan',
+    }),
   );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [areasExtra, setAreasExtra] = useState('');
-  const [pickupText, setPickupText] = useState('');
-  const [skillsText, setSkillsText] = useState('');
-  const [expertiseText, setExpertiseText] = useState('');
-  const [certsText, setCertsText] = useState('');
-  const [trainingText, setTrainingText] = useState('');
-  const [awardsText, setAwardsText] = useState('');
-  const [serviceForm, setServiceForm] = useState<Partial<GuideOfferedService> | null>(null);
-  const [blockedDateInput, setBlockedDateInput] = useState('');
-  const [photoCategory, setPhotoCategory] = useState<GuidePhoto['category']>('destinations');
+  const [uploading, setUploading] = useState<string | null>(null);
+  const [removingImage, setRemovingImage] = useState(false);
+  const [editAccount, setEditAccount] = useState(false);
+  const [otherLanguage, setOtherLanguage] = useState('');
+  const [serviceForm, setServiceForm] = useState<ServiceDraft | null>(null);
+  const [serviceError, setServiceError] = useState('');
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+
+  const patch = (next: Partial<GuideDetails>) => setDetails((d) => ({ ...d, ...next }));
+  const busy = saving || Boolean(uploading) || removingImage;
+  const index = STEPS.indexOf(step);
 
   const goPrevious = useWizardBack(() => {
-    if (step > 1) {
-      setStep((s) => s - 1);
+    if (index > 0) {
+      setStep(STEPS[index - 1]);
       return;
     }
-    if (isEditing) {
-      wizardBack(PROVIDER_SERVICE_TAB);
-      return;
-    }
-    wizardBack(ONBOARDING_LOCATION as never);
+    wizardBack(isEditing ? PROVIDER_SERVICE_TAB : (ONBOARDING_LOCATION as never));
   });
-
-  const hydrateFromGuide = useCallback((guide: GuideDetails) => {
-    setDetails((prev) => ({ ...prev, ...guide }));
-    setAreasExtra((guide.areasCovered ?? []).filter((a) => !GUIDE_AREA_SUGGESTIONS.includes(a as never)).join(', '));
-    setPickupText((guide.pickupLocations ?? []).join(', '));
-    setSkillsText((guide.specialSkills ?? []).join(', '));
-    setExpertiseText((guide.areasOfExpertise ?? []).join(', '));
-    setCertsText((guide.certifications ?? []).join(', '));
-    setTrainingText((guide.training ?? []).join(', '));
-    setAwardsText((guide.awards ?? []).join(', '));
-  }, []);
 
   useEffect(() => {
     let live = true;
     (async () => {
-      // Guide profile APIs need an existing provider. During onboarding that is
-      // created on the location step — send the user there if it is missing.
-      const hasProvider = Boolean(user?.providerId || provider?.id);
-      if (!isEditing && !hasProvider) {
+      // Guide profile APIs need an existing provider; during signup it is created on the location step.
+      if (!isEditing && !(user?.providerId || provider?.id)) {
         router.replace(ONBOARDING_LOCATION as never);
         return;
       }
-
+      const hydrate = (guide?: GuideDetails | null) => {
+        if (!guide) return;
+        setDetails((prev) => ({
+          ...prev,
+          ...guide,
+          fullName: guide.fullName || prev.fullName,
+          phone: guide.phone || prev.phone,
+          email: guide.email || prev.email,
+          city: guide.city || prev.city,
+          availability: guide.availability?.weekly?.length ? guide.availability : prev.availability ?? defaultGuideAvailability(),
+        }));
+      };
       try {
         const mine = await guideService.getMyProfile();
-        if (!live) return;
-        if (mine.guideDetails) hydrateFromGuide(mine.guideDetails);
-        else if (provider?.guideDetails) hydrateFromGuide(provider.guideDetails);
-        else if (draft.guide) hydrateFromGuide(draft.guide as GuideDetails);
+        if (live) hydrate(mine.guideDetails ?? provider?.guideDetails ?? (draft.guide as GuideDetails));
       } catch {
-        if (provider?.guideDetails) hydrateFromGuide(provider.guideDetails);
-        else if (draft.guide) hydrateFromGuide(draft.guide as GuideDetails);
+        if (live) hydrate(provider?.guideDetails ?? (draft.guide as GuideDetails));
       } finally {
         if (live) setLoading(false);
       }
@@ -187,242 +280,149 @@ export default function GuideOnboardingScreen() {
     return () => {
       live = false;
     };
-  }, [draft.guide, hydrateFromGuide, isEditing, provider?.guideDetails, provider?.id, user?.providerId]);
+    // Load once when the screen opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const patchForStep = useMemo((): Partial<GuideDetails> => {
-    const areasFromChips = details.areasCovered ?? [];
-    const extraAreas = splitCommaList(areasExtra);
-    return {
-      ...details,
-      pickupLocations: splitCommaList(pickupText),
-      areasCovered: Array.from(new Set([...areasFromChips, ...extraAreas])),
-      specialSkills: splitCommaList(skillsText),
-      areasOfExpertise: splitCommaList(expertiseText),
-      certifications: splitCommaList(certsText),
-      training: splitCommaList(trainingText),
-      awards: splitCommaList(awardsText),
-    };
-  }, [areasExtra, awardsText, certsText, details, expertiseText, pickupText, skillsText, trainingText]);
-
-  const persistDraft = async (patch: Partial<GuideDetails>, submit = false) => {
-    // An empty document picker is a local draft, not a saved document attachment.
-    const savedPatch = { ...patch, documents: patch.documents?.filter(document => Boolean(document.fileUrl)) };
-    setGuide(savedPatch);
-    setSaving(true);
-    try {
-      const res = await guideService.updateProfile(savedPatch, { submit });
-      hydrateFromGuide(res.guideDetails);
-      setGuide(res.guideDetails);
-      await saveProgress();
-      const refreshed = await guideService.refreshProviderAfterGuide();
-      if (refreshed) setProvider(refreshed);
-      return res;
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const uploadGuideImages = async (count = 1) => {
-    setUploading(true);
+  const upload = async (slot: string, count = 1) => {
+    setUploading(slot);
     try {
       const picked = await uploadService.pickImages(count);
       if (!picked.length) return [] as string[];
       const uploaded = await uploadService.uploadImages(picked, 'guides');
       return uploaded.map((item) => item.url);
+    } catch (error) {
+      Alert.alert('Upload failed', getApiErrorMessage(error));
+      return [] as string[];
     } finally {
-      setUploading(false);
+      setUploading(null);
     }
   };
 
-  const validateStep = (): boolean => {
-    const d = patchForStep;
-    switch (step) {
-      case 1:
-        if (!d.fullName?.trim()) {
-          Alert.alert('Required', 'Enter your full name.');
-          return false;
-        }
-        if (!d.phone?.trim()) {
-          Alert.alert('Required', 'Enter a phone number.');
-          return false;
-        }
-        return true;
-      case 2:
-        if (!d.city?.trim()) {
-          Alert.alert('Required', 'Enter your city.');
-          return false;
-        }
-        if (!(d.areasCovered?.length || splitCommaList(areasExtra).length)) {
-          Alert.alert('Required', 'Select or add at least one area you guide in.');
-          return false;
-        }
-        return true;
-      case 3:
-        if (!d.guideTypes?.length) {
-          Alert.alert('Required', 'Select at least one guide type.');
-          return false;
-        }
-        if (!d.shortBio?.trim()) {
-          Alert.alert('Required', 'Add a short bio.');
-          return false;
-        }
-        return true;
-      case 4:
-        if (!d.languages?.length) {
-          Alert.alert('Required', 'Add at least one language.');
-          return false;
-        }
-        return true;
-      default:
-        return true;
-    }
+  /** Saves the profile (submit = send for review), keeping the app's draft in step. */
+  const persist = async (next: Partial<GuideDetails>, submit = false) => {
+    const savedPatch = { ...next, documents: next.documents?.filter((d) => Boolean(d.fileUrl)) };
+    setGuide(savedPatch);
+    const res = await guideService.updateProfile(savedPatch, { submit });
+    setDetails((prev) => ({ ...prev, ...res.guideDetails }));
+    setGuide(res.guideDetails);
+    await saveProgress();
+    const refreshed = await guideService.refreshProviderAfterGuide();
+    if (refreshed) setProvider(refreshed);
   };
 
   const onContinue = async () => {
-    if (removingImage || saving || uploading) return;
-    if (!validateStep()) return;
-    const patch = patchForStep;
-    try {
-      if (step === 7 && patch.availability) {
-        setSaving(true);
-        await guideService.updateAvailability(patch.availability);
-        await persistDraft({ availability: patch.availability });
-        setSaving(false);
-      } else if (step < TOTAL_STEPS) {
-        await persistDraft(patch);
-      } else {
-        await persistDraft(patch, true);
-        if (isEditing) {
-          leaveProviderEditor(user);
-          return;
-        }
-        router.push('/(provider)/register/verification');
-        return;
-      }
-      setStep((s) => Math.min(TOTAL_STEPS, s + 1));
-    } catch (error) {
-      Alert.alert('Could not save', getApiErrorMessage(error));
-    }
-  };
-
-  const addLanguage = () => {
-    setDetails((d) => ({
-      ...d,
-      languages: [...(d.languages ?? []), { language: '', proficiency: 'conversational' }],
-    }));
-  };
-
-  const updateLanguage = (index: number, patch: Partial<GuideLanguage>) => {
-    setDetails((d) => {
-      const languages = [...(d.languages ?? [])];
-      languages[index] = { ...languages[index], ...patch };
-      return { ...d, languages };
-    });
-  };
-
-  const removeLanguage = (index: number) => {
-    setDetails((d) => ({
-      ...d,
-      languages: (d.languages ?? []).filter((_, i) => i !== index),
-    }));
-  };
-
-  const addDocument = () => {
-    setDetails((d) => ({
-      ...d,
-      documents: [
-        ...(d.documents ?? []),
-        {
-          id: newGuideId('doc'),
-          type: 'guide_license',
-          fileUrl: '',
-          status: 'pending',
-        },
-      ],
-    }));
-  };
-
-  const saveService = async () => {
-    if (!serviceForm?.name?.trim()) {
-      Alert.alert('Required', 'Service name is required.');
+    if (busy) return;
+    if (step === 'services' && serviceForm?.name.trim()) {
+      Alert.alert('Unsaved service', 'Add or cancel the service you are editing first.');
       return;
     }
-    const payload: GuideOfferedService = {
-      id: serviceForm.id ?? newGuideId('svc'),
-      name: serviceForm.name.trim(),
-      category: (serviceForm.category ?? 'local') as GuideType,
-      description: serviceForm.description?.trim() ?? '',
-      durationLabel: serviceForm.durationLabel?.trim() || 'Full day',
-      durationHours: serviceForm.durationHours,
-      price: Number(serviceForm.price) || 0,
-      pricingType: serviceForm.pricingType ?? 'per_day',
-      currency: 'PKR',
-      minGuests: Number(serviceForm.minGuests) || 1,
-      maxGuests: Number(serviceForm.maxGuests) || 10,
-      included: splitCommaList(String(serviceForm.included ?? '')),
-      excluded: splitCommaList(String(serviceForm.excluded ?? '')),
-      meetingPoint: serviceForm.meetingPoint,
-      availableLocations: splitCommaList(String(serviceForm.availableLocations ?? '')),
-      notes: serviceForm.notes,
-      active: serviceForm.active !== false,
-    };
-    setSaving(true);
+    const missing = MISSING[step](details);
+    if (missing.length) {
+      Alert.alert('A few things missing', missing.map((m) => `• ${m}`).join('\n'));
+      return;
+    }
+    const last = index === STEPS.length - 1;
     try {
-      if (serviceForm.id) {
-        await guideService.updateService(serviceForm.id, payload);
-      } else {
-        await guideService.createService(payload);
+      setSaving(true);
+      await persist(details, last);
+      if (!last) {
+        setStep(STEPS[index + 1]);
+        return;
       }
-      const res = await guideService.getMyProfile();
-      hydrateFromGuide(res.guideDetails);
-      setServiceForm(null);
+      if (isEditing) {
+        leaveProviderEditor(user);
+        return;
+      }
+      // Then the CNIC step (skippable for now) and the final Review & submit.
+      router.push('/(provider)/register/verification');
     } catch (error) {
-      Alert.alert('Could not save service', getApiErrorMessage(error));
+      Alert.alert('Could not save', getApiErrorMessage(error));
     } finally {
       setSaving(false);
     }
   };
 
-  const toggleArea = (area: string) => {
-    setDetails((d) => {
-      const set = new Set(d.areasCovered ?? []);
-      if (set.has(area)) set.delete(area);
-      else set.add(area);
-      return { ...d, areasCovered: Array.from(set) };
-    });
+  /* ---------- profile helpers ---------- */
+  const toggle = <T,>(list: T[] = [], value: T) => (list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
+  const hasLanguage = (name: string) => (details.languages ?? []).some((l) => l.language.toLowerCase() === name.toLowerCase());
+  const addLanguage = (name: string) => {
+    const clean = name.trim();
+    if (!clean || hasLanguage(clean)) return;
+    patch({ languages: [...(details.languages ?? []), { language: clean, proficiency: 'conversational' }] });
+  };
+  const setLanguage = (i: number, next: Partial<GuideLanguage>) =>
+    patch({ languages: (details.languages ?? []).map((l, j) => (j === i ? { ...l, ...next } : l)) });
+  const addArea = (name: string) => {
+    const clean = name.trim();
+    if (clean && !(details.areasCovered ?? []).some((a) => a.toLowerCase() === clean.toLowerCase()))
+      patch({ areasCovered: [...(details.areasCovered ?? []), clean] });
   };
 
-  const toggleGuideType = (value: string) => {
-    setDetails((d) => {
-      const set = new Set(d.guideTypes ?? []);
-      if (set.has(value as GuideType)) set.delete(value as GuideType);
-      else set.add(value as GuideType);
-      return { ...d, guideTypes: Array.from(set) as GuideType[] };
-    });
+  /* ---------- services helpers ---------- */
+  const commitService = () => {
+    if (!serviceForm) return;
+    const price = Number(serviceForm.price);
+    const max = Number(serviceForm.maxGuests);
+    if (serviceForm.name.trim().length < 3) return setServiceError('Give the service a name, e.g. “Hunza valley day tour”.');
+    if (!Number.isFinite(price) || price <= 0) return setServiceError('Enter a price in rupees.');
+    if (!Number.isInteger(max) || max < 1 || max > 50) return setServiceError('Group size must be between 1 and 50.');
+    const service: GuideOfferedService = {
+      id: serviceForm.id ?? newGuideId('svc'),
+      name: serviceForm.name.trim(),
+      // The type was chosen once, on the profile step.
+      category: serviceForm.category ?? details.guideTypes?.[0] ?? 'local',
+      description: serviceForm.description.trim(),
+      durationLabel: serviceForm.durationLabel || 'Full day',
+      durationHours: serviceForm.durationHours,
+      price,
+      pricingType: serviceForm.pricingType,
+      currency: 'PKR',
+      minGuests: 1,
+      maxGuests: max,
+      included: serviceForm.included,
+      excluded: [],
+      availableLocations: details.areasCovered ?? [],
+      active: true,
+    };
+    const list = details.services ?? [];
+    patch({ services: list.some((s) => s.id === service.id) ? list.map((s) => (s.id === service.id ? service : s)) : [...list, service] });
+    setServiceForm(null);
+    setServiceError('');
   };
 
-  const setWeeklyDay = (day: Weekday, patch: Partial<{ enabled: boolean; startTime: string; endTime: string }>) => {
-    setDetails((d) => {
-      const weekly = [...(d.availability?.weekly ?? [])];
-      const idx = weekly.findIndex((row) => row.day === day);
-      if (idx >= 0) weekly[idx] = { ...weekly[idx], ...patch };
-      return {
-        ...d,
-        availability: { ...(d.availability ?? { blockedDates: [] }), weekly, blockedDates: d.availability?.blockedDates ?? [] },
-      };
+  /* ---------- availability helpers ---------- */
+  const weekly = details.availability?.weekly ?? defaultGuideAvailability().weekly;
+  const availability = details.availability ?? defaultGuideAvailability();
+  const setDay = (day: Weekday, next: Partial<{ enabled: boolean; startTime: string; endTime: string }>) =>
+    patch({ availability: { ...availability, weekly: weekly.map((d) => (d.day === day ? { ...d, ...next } : d)) } });
+  const preset = (days: Weekday[]) =>
+    patch({ availability: { ...availability, weekly: weekly.map((d) => ({ ...d, enabled: days.includes(d.day) })) } });
+
+  /* ---------- documents helpers ---------- */
+  const docFor = (type: GuideDocumentType) => (details.documents ?? []).find((d) => d.type === type);
+  const setDoc = (type: GuideDocumentType, next: Partial<GuideDocument>) => {
+    const docs = details.documents ?? [];
+    const existing = docs.find((d) => d.type === type);
+    patch({
+      documents: existing
+        ? docs.map((d) => (d.type === type ? { ...d, ...next } : d))
+        : [...docs, { id: newGuideId('doc'), type, fileUrl: '', status: 'pending', ...next }],
     });
   };
 
   if (loading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + 40, alignItems: 'center' }]}>
-        <Text style={styles.sub}>Loading guide profile…</Text>
+        <Text style={styles.sub}>Loading your guide profile…</Text>
       </View>
     );
   }
 
+  const today = new Date().toISOString().slice(0, 10);
+
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Header
         title={isEditing ? 'Edit guide profile' : 'Travel guide setup'}
         showBack
@@ -430,570 +430,579 @@ export default function GuideOnboardingScreen() {
         onBack={goPrevious}
       />
       <ScrollView
-        contentContainerStyle={{
-          padding: Spacing.lg,
-          paddingBottom: insets.bottom + 32,
-          gap: Spacing.lg,
-        }}
+        contentContainerStyle={{ padding: Spacing.lg, paddingBottom: insets.bottom + 40, gap: Spacing.lg }}
         keyboardShouldPersistTaps="handled"
       >
-        <ProgressBar step={step} />
+        {/* Progress: tap a finished tab to go back to it */}
+        <View style={{ gap: Spacing.sm }}>
+          <Text style={styles.stepCount}>
+            Step {index + 1} of {STEPS.length}
+            {isEditing ? '' : ' · then CNIC and review'}
+          </Text>
+          <View style={styles.bar}>
+            {STEPS.map((s, i) => {
+              const done = i < index;
+              const active = i === index;
+              return (
+                <Pressable
+                  key={s}
+                  style={styles.segment}
+                  disabled={i >= index || busy}
+                  onPress={() => setStep(s)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${STEP_LABELS[s]}${done ? ', done' : active ? ', current step' : ''}`}
+                >
+                  <View style={[styles.track, (done || active) && { backgroundColor: Colors.primary }]} />
+                  <View style={styles.segLabelRow}>
+                    {done ? <Ionicons name="checkmark-circle" size={13} color={Colors.success} /> : null}
+                    <Text numberOfLines={1} style={[styles.segLabel, active && styles.segLabelActive, done && { color: Colors.dark }]}>
+                      {STEP_LABELS[s]}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
 
-        {step === 1 ? (
+        <View style={{ gap: Spacing.xs }}>
+          <Text style={styles.heading}>{TITLES[step]}</Text>
+          <Text style={styles.sub}>{SUBTITLES[step]}</Text>
+        </View>
+
+        {details.profileStatus === 'changes_requested' ? (
+          <View style={[styles.notice, styles.noticeWarn]}>
+            <Ionicons name="create-outline" size={18} color={Colors.warning} />
+            <Text style={styles.noticeText}>{details.changesRequestedNote || 'BANJARA asked for a few changes. Update your profile and submit it again.'}</Text>
+          </View>
+        ) : null}
+
+        {/* ============================ 1 · PROFILE ============================ */}
+        {step === 'profile' ? (
           <>
-            <Text style={styles.heading}>Basic information</Text>
-            <Text style={styles.sub}>How travelers will recognize you when hiring a guide.</Text>
+            {editAccount || !details.fullName || !validPhone(details.phone) ? (
+              <View style={{ gap: Spacing.md }}>
+                <Input label="Full name (as on your CNIC)" value={details.fullName ?? ''} onChangeText={(v) => patch({ fullName: v })} />
+                <Input label="Phone" keyboardType="phone-pad" value={details.phone ?? ''} onChangeText={(v) => patch({ phone: v })} />
+                <Input label="Email" keyboardType="email-address" autoCapitalize="none" value={details.email ?? ''} onChangeText={(v) => patch({ email: v })} />
+              </View>
+            ) : (
+              <View style={styles.accountCard}>
+                <Ionicons name="person-circle-outline" size={30} color={Colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardTitle}>{details.fullName}</Text>
+                  <Text style={styles.meta} numberOfLines={1}>
+                    {[details.phone, details.email].filter(Boolean).join(' · ')}
+                  </Text>
+                </View>
+                <Pressable onPress={() => setEditAccount(true)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Edit name, phone and email">
+                  <Text style={styles.link}>Edit</Text>
+                </Pressable>
+              </View>
+            )}
+
+            <Section n={1} title="Your photo" sub="A clear, friendly photo of your face — no sunglasses" />
             <ImagePickerField
-              disabled={saving || uploading || removingImage}
-              onRemovingChange={setRemovingImage}
-              label="Profile photo"
+              label="Profile photo *"
               urls={details.profilePhoto ? [details.profilePhoto] : []}
               max={1}
-              uploading={uploading}
-              onAdd={() =>
-                void (async () => {
-                  const urls = await uploadGuideImages(1);
-                  if (urls[0]) setDetails((d) => ({ ...d, profilePhoto: urls[0] }));
-                })()
-              }
-              onRemove={() => setDetails((d) => ({ ...d, profilePhoto: '' }))}
-            />
-            <Input
-              label="Full name *"
-              value={details.fullName ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, fullName: v }))}
-            />
-            <View style={styles.genderBlock}>
-              <Text style={styles.fieldLabel}>Gender</Text>
-              <View style={styles.genderRow}>
-                {(['male', 'female', 'other'] as const).map((g) => {
-                  const active = details.gender === g;
-                  return (
-                    <Pressable
-                      key={g}
-                      onPress={() => setDetails((d) => ({ ...d, gender: g }))}
-                      style={[styles.genderChip, active && styles.genderChipActive]}
-                    >
-                      <Text style={[styles.genderText, active && styles.genderTextActive]}>
-                        {g === 'male' ? 'Male' : g === 'female' ? 'Female' : 'Other'}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-            <Input
-              label="Date of birth"
-              value={details.dateOfBirth ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, dateOfBirth: v }))}
-              placeholder="YYYY-MM-DD"
-            />
-            <Input
-              label="Age"
-              keyboardType="number-pad"
-              value={details.age != null ? String(details.age) : ''}
-              onChangeText={(v) =>
-                setDetails((d) => ({ ...d, age: Number(v) || undefined }))
-              }
-            />
-            <Input
-              label="Phone *"
-              value={details.phone ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, phone: v }))}
-              keyboardType="phone-pad"
-            />
-            <Input
-              label="WhatsApp"
-              value={details.whatsapp ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, whatsapp: v }))}
-              keyboardType="phone-pad"
-            />
-            <Input
-              label="Email"
-              value={details.email ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, email: v }))}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <Input
-              label="CNIC number"
-              value={details.cnicNumber ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, cnicNumber: v }))}
-            />
-            <ImagePickerField
-              disabled={saving || uploading || removingImage}
+              uploading={uploading === 'profile'}
+              disabled={busy}
               onRemovingChange={setRemovingImage}
-              label="CNIC front"
-              urls={details.cnicFrontUrl ? [details.cnicFrontUrl] : []}
-              max={1}
-              uploading={uploading}
-              onAdd={() =>
-                void (async () => {
-                  const urls = await uploadGuideImages(1);
-                  if (urls[0]) setDetails((d) => ({ ...d, cnicFrontUrl: urls[0] }));
-                })()
-              }
-              onRemove={() => setDetails((d) => ({ ...d, cnicFrontUrl: '' }))}
+              onAdd={() => void upload('profile').then((urls) => urls[0] && patch({ profilePhoto: urls[0] }))}
+              onRemove={() => patch({ profilePhoto: '' })}
             />
-            <ImagePickerField
-              disabled={saving || uploading || removingImage}
-              onRemovingChange={setRemovingImage}
-              label="CNIC back"
-              urls={details.cnicBackUrl ? [details.cnicBackUrl] : []}
-              max={1}
-              uploading={uploading}
-              onAdd={() =>
-                void (async () => {
-                  const urls = await uploadGuideImages(1);
-                  if (urls[0]) setDetails((d) => ({ ...d, cnicBackUrl: urls[0] }));
-                })()
-              }
-              onRemove={() => setDetails((d) => ({ ...d, cnicBackUrl: '' }))}
-            />
-          </>
-        ) : null}
 
-        {step === 2 ? (
-          <>
-            <Text style={styles.heading}>Location</Text>
-            <Input
-              label="Country"
-              value={details.country ?? 'Pakistan'}
-              onChangeText={(v) => setDetails((d) => ({ ...d, country: v }))}
-            />
-            <Input
-              label="Province"
-              value={details.province ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, province: v }))}
-            />
-            <Input
-              label="District"
-              value={details.district ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, district: v }))}
-            />
-            <LocationPinField
-              label="City *"
-              value={details.city ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, city: v }))}
-              result="city"
-              onPicked={picked => setDetails(d => ({ ...d, city: picked.address.city || picked.placeName || d.city, province: picked.address.region || d.province, country: picked.address.country || d.country }))}
-            />
-            <LocationPinField
-              label="Current location"
-              value={details.currentLocation ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, currentLocation: v }))}
-            />
-            <Text style={styles.fieldLabel}>Areas covered *</Text>
-            <ChipSelect
-              options={GUIDE_AREA_SUGGESTIONS.map((a) => ({ value: a, label: a }))}
-              selected={details.areasCovered ?? []}
-              onToggle={toggleArea}
-            />
-            <Input
-              label="Other areas"
-              value={areasExtra}
-              onChangeText={setAreasExtra}
-              placeholder="Comma-separated"
-              hint="Add regions beyond the suggestions above"
-            />
-            <LocationPinField
-              label="Pickup locations"
-              value={pickupText}
-              onChangeText={setPickupText}
-              placeholder="e.g. Gilgit airport, hotel lobby"
-              hint="Comma-separated"
-              result="place"
-              append
-            />
-          </>
-        ) : null}
-
-        {step === 3 ? (
-          <>
-            <Text style={styles.heading}>Professional profile</Text>
-            <Text style={styles.fieldLabel}>Guide types *</Text>
-            <ChipSelect
+            <Section n={2} title="What kind of guide are you?" sub="Choose all that fit" />
+            <Chips
               options={GUIDE_TYPE_OPTIONS}
               selected={details.guideTypes ?? []}
-              onToggle={toggleGuideType}
+              onToggle={(v) => patch({ guideTypes: toggle(details.guideTypes, v as GuideType) })}
             />
+
+            <Section n={3} title="Where do you guide?" sub="Tap the places you know well, or search for others" />
+            <Chips
+              icon="location-outline"
+              options={[...AREAS, ...(details.areasCovered ?? []).filter((a) => !AREAS.includes(a))].map((a) => ({ value: a, label: a }))}
+              selected={details.areasCovered ?? []}
+              onToggle={(v) => patch({ areasCovered: toggle(details.areasCovered, v) })}
+            />
+            <PlaceAutocompleteSelect
+              label="Add another place"
+              placeholder="Search any valley, town or village"
+              value=""
+              suggestions={TRIP_CITY_OPTIONS}
+              leftIcon="add-circle-outline"
+              onChange={(name) => addArea(name)}
+            />
+            <PlaceAutocompleteSelect
+              label="Based in"
+              placeholder="Your town or city"
+              value={details.city ?? ''}
+              suggestions={TRIP_CITY_OPTIONS}
+              leftIcon="home-outline"
+              onChange={(name, place) => patch({ city: place?.address.city || name })}
+            />
+
+            <Section n={4} title="Languages you speak" sub="Travellers filter guides by language" />
+            <Chips
+              icon="add"
+              options={LANGUAGES.filter((l) => !hasLanguage(l)).map((l) => ({ value: l, label: l }))}
+              selected={[]}
+              onToggle={addLanguage}
+            />
+            {(details.languages ?? []).map((row, i) => (
+              <View key={`${row.language}-${i}`} style={styles.card}>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.cardTitle}>{row.language || 'Language'}</Text>
+                  <Pressable
+                    hitSlop={8}
+                    accessibilityLabel={`Remove ${row.language}`}
+                    onPress={() => patch({ languages: (details.languages ?? []).filter((_, j) => j !== i) })}
+                  >
+                    <Ionicons name="close-circle" size={22} color={Colors.mutedLight} />
+                  </Pressable>
+                </View>
+                <View style={styles.segmented}>
+                  {LEVELS.map((level) => {
+                    const on = row.proficiency === level.value;
+                    return (
+                      <Pressable
+                        key={level.value}
+                        style={[styles.segBtn, on && styles.segBtnOn]}
+                        onPress={() => setLanguage(i, { proficiency: level.value })}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: on }}
+                      >
+                        <Text style={[styles.segBtnText, on && styles.segBtnTextOn]}>{level.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
+            <View style={styles.addRow}>
+              <View style={{ flex: 1 }}>
+                <Input label="Other language" placeholder="e.g. French" value={otherLanguage} onChangeText={setOtherLanguage} />
+              </View>
+              <Button
+                title="Add"
+                variant="outline"
+                compact
+                disabled={!otherLanguage.trim()}
+                onPress={() => {
+                  addLanguage(otherLanguage);
+                  setOtherLanguage('');
+                }}
+              />
+            </View>
+
+            <Section n={5} title="About you" sub="Write like you’d introduce yourself to a traveller" />
             <Input
-              label="Years of experience"
+              label="Guiding experience (years)"
               keyboardType="number-pad"
               value={details.yearsExperience != null ? String(details.yearsExperience) : ''}
-              onChangeText={(v) =>
-                setDetails((d) => ({ ...d, yearsExperience: Number(v) || 0 }))
-              }
+              onChangeText={(v) => patch({ yearsExperience: v ? Number(v.replace(/\D/g, '')) : undefined })}
             />
-            <Input
+            <Counted
               label="Short bio *"
               value={details.shortBio ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, shortBio: v }))}
-              multiline
+              onChange={(v) => patch({ shortBio: v })}
+              max={300}
+              min={30}
+              placeholder="Born and raised in Karimabad. I’ve guided treks to Rakaposhi base camp for 8 years…"
             />
-            <Input
-              label="Detailed description"
+            <Counted
+              label="More about your tours (optional)"
               value={details.detailedDescription ?? ''}
-              onChangeText={(v) => setDetails((d) => ({ ...d, detailedDescription: v }))}
-              multiline
+              onChange={(v) => patch({ detailedDescription: v })}
+              max={1500}
+              placeholder="What a typical day with you looks like, safety, gear you provide…"
             />
-            <Input label="Special skills" value={skillsText} onChangeText={setSkillsText} hint="Comma-separated" />
-            <Input label="Areas of expertise" value={expertiseText} onChangeText={setExpertiseText} hint="Comma-separated" />
-            <Input label="Certifications" value={certsText} onChangeText={setCertsText} hint="Comma-separated" />
-            <Input label="Training" value={trainingText} onChangeText={setTrainingText} hint="Comma-separated" />
-            <Input label="Awards" value={awardsText} onChangeText={setAwardsText} hint="Comma-separated" />
-            <Input
-              label="Fallback daily rate (PKR)"
-              keyboardType="number-pad"
-              value={details.dailyHireRate != null ? String(details.dailyHireRate) : ''}
-              onChangeText={(v) =>
-                setDetails((d) => ({ ...d, dailyHireRate: Number(v) || undefined }))
-              }
-            />
+            <Tags label="Special skills (optional)" values={details.specialSkills ?? []} onChange={(v) => patch({ specialSkills: v })} placeholder="e.g. Glacier walks" />
+            <Tags label="Certifications & training (optional)" values={details.certifications ?? []} onChange={(v) => patch({ certifications: v })} placeholder="e.g. Wilderness first aid" />
           </>
         ) : null}
 
-        {step === 4 ? (
+        {/* ============================ 2 · SERVICES ============================ */}
+        {step === 'services' ? (
           <>
-            <Text style={styles.heading}>Languages</Text>
-            {(details.languages ?? []).map((row, index) => (
-              <View key={`lang-${index}`} style={styles.card}>
-                <Input
-                  label="Language"
-                  value={row.language}
-                  onChangeText={(v) => updateLanguage(index, { language: v })}
-                />
-                <Text style={styles.fieldLabel}>Proficiency</Text>
-                <ChipSelect
-                  options={LANGUAGE_PROFICIENCY_OPTIONS}
-                  selected={[row.proficiency]}
-                  onToggle={(v) => updateLanguage(index, { proficiency: v as LanguageProficiency })}
-                />
-                <Button title="Remove" variant="outline" compact onPress={() => removeLanguage(index)} />
+            <Section n={1} title="What travellers can book" sub="Each service shows on your profile with its price" />
+            {(details.services ?? []).map((s) => (
+              <View key={s.id} style={styles.serviceCard}>
+                <View style={styles.serviceIcon}>
+                  <Ionicons name="compass-outline" size={18} color={Colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardTitle}>{s.name}</Text>
+                  <Text style={styles.meta}>
+                    {[s.durationLabel, `up to ${s.maxGuests} guests`].filter(Boolean).join(' · ')}
+                  </Text>
+                  <Text style={styles.price}>
+                    {rupees(s.price)} <Text style={styles.meta}>{PRICING_SHORT[s.pricingType]}</Text>
+                  </Text>
+                </View>
+                <Pressable
+                  hitSlop={8}
+                  accessibilityLabel={`Edit ${s.name}`}
+                  onPress={() =>
+                    setServiceForm({
+                      id: s.id,
+                      name: s.name,
+                      category: s.category,
+                      description: s.description ?? '',
+                      durationLabel: s.durationLabel,
+                      durationHours: s.durationHours,
+                      price: String(s.price),
+                      pricingType: s.pricingType,
+                      maxGuests: String(s.maxGuests),
+                      included: s.included ?? [],
+                    })
+                  }
+                >
+                  <Ionicons name="create-outline" size={20} color={Colors.primary} />
+                </Pressable>
+                <Pressable
+                  hitSlop={8}
+                  accessibilityLabel={`Remove ${s.name}`}
+                  onPress={() => patch({ services: (details.services ?? []).filter((x) => x.id !== s.id) })}
+                >
+                  <Ionicons name="trash-outline" size={20} color={Colors.danger} />
+                </Pressable>
               </View>
             ))}
-            <Button title="Add language" variant="outline" onPress={addLanguage} />
-          </>
-        ) : null}
 
-        {step === 5 ? (
-          <>
-            <Text style={styles.heading}>Documents</Text>
-            {(details.documents ?? []).map((doc, index) => (
-              <View key={doc.id} style={styles.card}>
-                <Text style={styles.fieldLabel}>Document {index + 1}</Text>
-                <ChipSelect
-                  options={GUIDE_DOCUMENT_TYPE_OPTIONS}
-                  selected={[doc.type]}
-                  onToggle={(v) =>
-                    setDetails((d) => {
-                      const documents = [...(d.documents ?? [])];
-                      documents[index] = { ...documents[index], type: v as GuideDocument['type'] };
-                      return { ...d, documents };
-                    })
-                  }
-                />
-                <Input
-                  label="Number"
-                  value={doc.number ?? ''}
-                  onChangeText={(v) =>
-                    setDetails((d) => {
-                      const documents = [...(d.documents ?? [])];
-                      documents[index] = { ...documents[index], number: v };
-                      return { ...d, documents };
-                    })
-                  }
-                />
-                <Input
-                  label="Issue date"
-                  value={doc.issueDate ?? ''}
-                  onChangeText={(v) =>
-                    setDetails((d) => {
-                      const documents = [...(d.documents ?? [])];
-                      documents[index] = { ...documents[index], issueDate: v };
-                      return { ...d, documents };
-                    })
-                  }
-                  placeholder="YYYY-MM-DD"
-                />
-                <Input
-                  label="Expiry date"
-                  value={doc.expiryDate ?? ''}
-                  onChangeText={(v) =>
-                    setDetails((d) => {
-                      const documents = [...(d.documents ?? [])];
-                      documents[index] = { ...documents[index], expiryDate: v };
-                      return { ...d, documents };
-                    })
-                  }
-                  placeholder="YYYY-MM-DD"
-                />
-                <ImagePickerField
-                  disabled={saving || uploading || removingImage}
-                  onRemovingChange={setRemovingImage}
-                  label="Document file"
-                  urls={doc.fileUrl ? [doc.fileUrl] : []}
-                  max={1}
-                  uploading={uploading}
-                  onAdd={() =>
-                    void (async () => {
-                      const urls = await uploadGuideImages(1);
-                      if (!urls[0]) return;
-                      setDetails((d) => {
-                        const documents = [...(d.documents ?? [])];
-                        documents[index] = { ...documents[index], fileUrl: urls[0] };
-                        return { ...d, documents };
-                      });
-                    })()
-                  }
-                  onRemove={() =>
-                    setDetails((d) => {
-                      const documents = [...(d.documents ?? [])];
-                      documents[index] = { ...documents[index], fileUrl: '' };
-                      return { ...d, documents };
-                    })
-                  }
-                />
-              </View>
-            ))}
-            <Button title="Add document" variant="outline" onPress={addDocument} />
-          </>
-        ) : null}
-
-        {step === 6 ? (
-          <>
-            <Text style={styles.heading}>Offered services</Text>
-            {(details.services ?? []).map((svc) => (
-              <Pressable
-                key={svc.id}
-                style={styles.card}
-                onPress={() => setServiceForm({ ...svc })}
-              >
-                <Text style={styles.cardTitle}>{svc.name}</Text>
-                <Text style={styles.sub}>
-                  {svc.durationLabel} · {formatCurrency(svc.price)} · {svc.active ? 'Active' : 'Disabled'}
-                </Text>
-              </Pressable>
-            ))}
             {serviceForm ? (
-              <View style={styles.card}>
-                <Input label="Service name *" value={serviceForm.name ?? ''} onChangeText={(v) => setServiceForm((f) => ({ ...f, name: v }))} />
-                <ChipSelect
-                  options={GUIDE_TYPE_OPTIONS}
-                  selected={serviceForm.category ? [serviceForm.category] : []}
-                  onToggle={(v) => setServiceForm((f) => ({ ...f, category: v as GuideType }))}
+              <View style={styles.editor}>
+                <Text style={styles.cardTitle}>{serviceForm.id ? 'Edit service' : (details.services ?? []).length ? 'Add another service' : 'Your first service'}</Text>
+                {serviceError ? <Text style={styles.error}>{serviceError}</Text> : null}
+                <Input
+                  label="Name *"
+                  placeholder="e.g. Hunza day tour"
+                  value={serviceForm.name}
+                  onChangeText={(v) => {
+                    setServiceError('');
+                    setServiceForm({ ...serviceForm, name: v });
+                  }}
                 />
-                <Input label="Description" value={serviceForm.description ?? ''} onChangeText={(v) => setServiceForm((f) => ({ ...f, description: v }))} multiline />
-                <Input label="Duration label" value={serviceForm.durationLabel ?? ''} onChangeText={(v) => setServiceForm((f) => ({ ...f, durationLabel: v }))} />
-                <Input label="Price (PKR)" keyboardType="number-pad" value={serviceForm.price != null ? String(serviceForm.price) : ''} onChangeText={(v) => setServiceForm((f) => ({ ...f, price: Number(v) || 0 }))} />
-                <Text style={styles.fieldLabel}>Pricing type</Text>
-                <ChipSelect
-                  options={GUIDE_PRICING_TYPE_OPTIONS}
-                  selected={serviceForm.pricingType ? [serviceForm.pricingType] : ['per_day']}
-                  onToggle={(v) => setServiceForm((f) => ({ ...f, pricingType: v as GuideOfferedService['pricingType'] }))}
+                {!serviceForm.name.trim() && nameIdeas(details).length ? (
+                  <>
+                    <Text style={styles.meta}>Ideas from your profile — tap one</Text>
+                    <Chips
+                      icon="add"
+                      options={nameIdeas(details).map((idea) => ({ value: idea, label: idea }))}
+                      selected={[]}
+                      onToggle={(idea) => {
+                        setServiceError('');
+                        setServiceForm({ ...serviceForm, name: idea });
+                      }}
+                    />
+                  </>
+                ) : null}
+                <Text style={styles.fieldLabel}>How long?</Text>
+                <Chips
+                  icon="time-outline"
+                  options={DURATIONS.map((d) => ({ value: d.label, label: d.label }))}
+                  selected={[serviceForm.durationLabel]}
+                  onToggle={(v) => setServiceForm({ ...serviceForm, durationLabel: v, durationHours: DURATIONS.find((d) => d.label === v)?.hours })}
                 />
-                <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+                <Text style={styles.fieldLabel}>How do you charge?</Text>
+                <View style={styles.optionGrid}>
+                  {PRICING.map((p) => {
+                    const on = serviceForm.pricingType === p.value;
+                    return (
+                      <Pressable
+                        key={p.value}
+                        style={[styles.option, on && styles.optionOn]}
+                        onPress={() => setServiceForm({ ...serviceForm, pricingType: p.value })}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: on }}
+                      >
+                        <Text style={[styles.optionTitle, on && { color: Colors.primary }]}>{p.label}</Text>
+                        <Text style={styles.meta}>{p.sub}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <View style={styles.addRow}>
                   <View style={{ flex: 1 }}>
-                    <Button title="Save service" disabled={removingImage} loading={saving} onPress={() => void saveService()} />
+                    <Input
+                      label={`Price (Rs) ${PRICING_SHORT[serviceForm.pricingType]} *`}
+                      keyboardType="number-pad"
+                      placeholder="e.g. 6000"
+                      value={serviceForm.price}
+                      onChangeText={(v) => setServiceForm({ ...serviceForm, price: v.replace(/\D/g, '') })}
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Button title="Cancel" variant="outline" onPress={() => setServiceForm(null)} />
+                    <Input
+                      label="Max group size *"
+                      keyboardType="number-pad"
+                      value={serviceForm.maxGuests}
+                      onChangeText={(v) => setServiceForm({ ...serviceForm, maxGuests: v.replace(/\D/g, '') })}
+                    />
+                  </View>
+                </View>
+                <Counted
+                  label="What will travellers do? (optional)"
+                  value={serviceForm.description}
+                  onChange={(v) => setServiceForm({ ...serviceForm, description: v })}
+                  max={600}
+                  placeholder="Walk through Altit village, visit Altit Fort, lunch with a local family…"
+                />
+                <Tags label="Included (optional)" values={serviceForm.included} onChange={(v) => setServiceForm({ ...serviceForm, included: v })} placeholder="Your own item" />
+                <Chips
+                  icon="add"
+                  options={INCLUDED_IDEAS.filter((i) => !serviceForm.included.includes(i)).map((i) => ({ value: i, label: i }))}
+                  selected={[]}
+                  onToggle={(i) => setServiceForm({ ...serviceForm, included: [...serviceForm.included, i] })}
+                />
+                <View style={styles.saveNote}>
+                  <Ionicons name="chatbubbles-outline" size={14} color={Colors.muted} />
+                  <Text style={styles.meta}>The meeting place is agreed with each traveller in chat after they book.</Text>
+                </View>
+                <View style={styles.addRow}>
+                  {(details.services ?? []).length || serviceForm.id ? (
+                    <View style={{ flex: 1 }}>
+                      <Button title="Cancel" variant="outline" onPress={() => { setServiceForm(null); setServiceError(''); }} />
+                    </View>
+                  ) : null}
+                  <View style={{ flex: 1 }}>
+                    <Button title={serviceForm.id ? 'Update service' : 'Add service'} onPress={commitService} />
                   </View>
                 </View>
               </View>
             ) : (
-              <Button
-                title="Add service"
-                variant="outline"
-                onPress={() =>
-                  setServiceForm({
-                    category: 'local',
-                    pricingType: 'per_day',
-                    minGuests: 1,
-                    maxGuests: 10,
-                    active: true,
-                  })
-                }
-              />
+              <Button title={(details.services ?? []).length ? 'Add another service' : 'Add a service'} variant="outline" onPress={() => setServiceForm(blankService())} />
             )}
+
+            <View style={styles.or}>
+              <View style={styles.orLine} />
+              <Text style={styles.orText}>OR</Text>
+              <View style={styles.orLine} />
+            </View>
+
+            <Section n={2} title="Daily hire rate" sub="Optional: travellers hire you for a full day and plan it with you" />
+            <Input
+              label="Rate per day (Rs)"
+              keyboardType="number-pad"
+              placeholder="e.g. 8000"
+              value={details.dailyHireRate ? String(details.dailyHireRate) : ''}
+              onChangeText={(v) => patch({ dailyHireRate: Number(v.replace(/\D/g, '')) || undefined })}
+            />
           </>
         ) : null}
 
-        {step === 7 ? (
+        {/* ============================ 3 · AVAILABILITY ============================ */}
+        {step === 'schedule' ? (
           <>
-            <Text style={styles.heading}>Availability</Text>
-            {(details.availability?.weekly ?? []).map((row) => (
-              <View key={row.day} style={styles.card}>
+            <Section n={1} title="Your week" sub="Turn on the days you can guide and set your hours" />
+            <View style={styles.chipGrid}>
+              <SmallChip label="Every day" onPress={() => preset(WEEK)} />
+              <SmallChip label="Weekdays" onPress={() => preset(['monday', 'tuesday', 'wednesday', 'thursday', 'friday'])} />
+              <SmallChip label="Weekends" onPress={() => preset(['saturday', 'sunday'])} />
+            </View>
+            {weekly.map((d) => (
+              <View key={d.day} style={[styles.dayRow, !d.enabled && styles.dayOff]}>
                 <View style={styles.rowBetween}>
-                  <Text style={styles.cardTitle}>{WEEKDAY_LABELS[row.day]}</Text>
-                  <Switch
-                    value={row.enabled}
-                    onValueChange={(enabled) => setWeeklyDay(row.day, { enabled })}
-                  />
+                  <Text style={styles.cardTitle}>{WEEKDAY_LABELS[d.day]}</Text>
+                  <Switch value={d.enabled} onValueChange={(enabled) => setDay(d.day, { enabled })} />
                 </View>
-                {row.enabled ? (
-                  <>
-                    <Input label="Start" value={row.startTime} onChangeText={(v) => setWeeklyDay(row.day, { startTime: v })} />
-                    <Input label="End" value={row.endTime} onChangeText={(v) => setWeeklyDay(row.day, { endTime: v })} />
-                  </>
-                ) : null}
+                {d.enabled ? (
+                  <View style={styles.addRow}>
+                    <TimeBox label="From" value={d.startTime} onChange={(v) => setDay(d.day, { startTime: v })} />
+                    <TimeBox label="To" value={d.endTime} onChange={(v) => setDay(d.day, { endTime: v })} />
+                  </View>
+                ) : (
+                  <Text style={styles.meta}>Not available</Text>
+                )}
               </View>
             ))}
-            <Input
-              label="Add blocked date"
-              value={blockedDateInput}
-              onChangeText={setBlockedDateInput}
-              placeholder="YYYY-MM-DD"
+
+            <Section n={2} title="Booking notice" sub="How far ahead must travellers book you?" />
+            <Chips
+              options={NOTICE.map((n) => ({ value: String(n.hours), label: n.label }))}
+              selected={[String(availability.advanceBookingHours ?? 24)]}
+              onToggle={(v) => patch({ availability: { ...availability, weekly, advanceBookingHours: Number(v) } })}
             />
-            <Button
-              title="Block date"
-              variant="outline"
-              compact
-              onPress={() => {
-                const d = blockedDateInput.trim();
-                if (!d) return;
-                setDetails((prev) => ({
-                  ...prev,
-                  availability: {
-                    ...(prev.availability ?? { weekly: [], blockedDates: [] }),
-                    blockedDates: Array.from(new Set([...(prev.availability?.blockedDates ?? []), d])),
-                  },
-                }));
-                setBlockedDateInput('');
+
+            <Section n={3} title="Days off (optional)" sub="Dates you already know you can’t guide" />
+            <Button title="Add a day off" variant="outline" compact onPress={() => setDatePickerOpen(true)} />
+            <View style={styles.chipGrid}>
+              {(availability.blockedDates ?? []).map((date) => (
+                <Pressable
+                  key={date}
+                  style={styles.tag}
+                  onPress={() => patch({ availability: { ...availability, weekly, blockedDates: availability.blockedDates.filter((x) => x !== date) } })}
+                  accessibilityLabel={`Remove day off ${date}`}
+                >
+                  <Text style={styles.tagText}>
+                    {new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </Text>
+                  <Ionicons name="close" size={14} color={Colors.primary} />
+                </Pressable>
+              ))}
+            </View>
+            <DatePickerModal
+              visible={datePickerOpen}
+              title="Day off"
+              value={today}
+              minimumDate={new Date()}
+              onClose={() => setDatePickerOpen(false)}
+              onChange={(iso) => {
+                const date = iso.slice(0, 10);
+                if (!availability.blockedDates.includes(date))
+                  patch({ availability: { ...availability, weekly, blockedDates: [...availability.blockedDates, date].sort() } });
+                setDatePickerOpen(false);
               }}
             />
-            {(details.availability?.blockedDates ?? []).map((d) => (
-              <Pressable
-                key={d}
-                onPress={() =>
-                  setDetails((prev) => ({
-                    ...prev,
-                    availability: {
-                      ...(prev.availability ?? { weekly: [], blockedDates: [] }),
-                      blockedDates: (prev.availability?.blockedDates ?? []).filter((x) => x !== d),
-                    },
-                  }))
-                }
-              >
-                <Text style={styles.sub}>Blocked: {d} (tap to remove)</Text>
-              </Pressable>
-            ))}
           </>
         ) : null}
 
-        {step === 8 ? (
+        {/* ============================ 4 · PHOTOS ============================ */}
+        {step === 'photos' ? (
           <>
-            <Text style={styles.heading}>Photos</Text>
-            <Text style={styles.fieldLabel}>Category for new photos</Text>
-            <ChipSelect
-              options={GUIDE_PHOTO_CATEGORY_OPTIONS}
-              selected={[photoCategory]}
-              onToggle={(v) => setPhotoCategory(v as GuidePhoto['category'])}
-            />
+            <Section n={1} title="Trip photos (optional)" sub={`Up to ${MAX_PHOTOS}: views, groups you’ve guided, you on the trail`} />
             <ImagePickerField
-              disabled={saving || uploading || removingImage}
-              onRemovingChange={setRemovingImage}
               label="Gallery"
               urls={(details.photos ?? []).map((p) => p.url)}
-              max={12}
-              uploading={uploading}
+              max={MAX_PHOTOS}
+              uploading={uploading === 'gallery'}
+              disabled={busy}
+              onRemovingChange={setRemovingImage}
               onAdd={() =>
-                void (async () => {
-                  const urls = await uploadGuideImages(3);
+                void upload('gallery', 3).then((urls) => {
                   if (!urls.length) return;
-                  setDetails((d) => ({
-                    ...d,
-                    photos: [
-                      ...(d.photos ?? []),
-                      ...urls.map((url) => ({
-                        id: newGuideId('photo'),
-                        url,
-                        category: photoCategory,
-                      })),
-                    ],
-                  }));
-                })()
+                  patch({
+                    photos: [...(details.photos ?? []), ...urls.map((url) => ({ id: newGuideId('photo'), url, category: 'destinations' as const }))].slice(0, MAX_PHOTOS),
+                  });
+                })
               }
-              onRemove={(index) =>
-                setDetails((d) => ({
-                  ...d,
-                  photos: (d.photos ?? []).filter((_, i) => i !== index),
-                }))
-              }
+              onRemove={(i) => patch({ photos: (details.photos ?? []).filter((_, j) => j !== i) })}
             />
+
+            <Section n={2} title="Licences & certificates (optional)" sub="Only the BANJARA team sees these. Verified guides get a badge." />
+            {DOCS.map((d) => {
+              const doc = docFor(d.type);
+              return (
+                <View key={d.type} style={styles.card}>
+                  <Text style={styles.cardTitle}>{d.label}</Text>
+                  <Text style={styles.meta}>{d.hint}</Text>
+                  <ImagePickerField
+                    label="Photo of the document"
+                    urls={doc?.fileUrl ? [doc.fileUrl] : []}
+                    max={1}
+                    uploading={uploading === d.type}
+                    disabled={busy}
+                    onRemovingChange={setRemovingImage}
+                    onAdd={() => void upload(d.type).then((urls) => urls[0] && setDoc(d.type, { fileUrl: urls[0] }))}
+                    onRemove={() => setDoc(d.type, { fileUrl: '' })}
+                  />
+                  <Input label="Number (optional)" value={doc?.number ?? ''} onChangeText={(v) => setDoc(d.type, { number: v })} />
+                </View>
+              );
+            })}
           </>
         ) : null}
 
-        {step === 9 ? (
-          <>
-            <Text style={styles.heading}>Review & submit</Text>
-            <Text style={styles.sub}>
-              Submit your guide profile for review. You can still edit later from your dashboard.
-            </Text>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>{patchForStep.fullName}</Text>
-              <Text style={styles.sub}>{patchForStep.city} · {(patchForStep.guideTypes ?? []).join(', ')}</Text>
-              <Text style={styles.sub}>{patchForStep.shortBio}</Text>
-              <Text style={styles.sub}>
-                {(patchForStep.languages ?? []).length} languages · {(patchForStep.services ?? []).length} services
-              </Text>
-              {patchForStep.profileStatus ? (
-                <Text style={styles.sub}>Status: {patchForStep.profileStatus}</Text>
-              ) : null}
-            </View>
-          </>
-        ) : null}
-
+        <View style={styles.saveNote}>
+          <Ionicons name="checkmark-circle-outline" size={14} color={Colors.muted} />
+          <Text style={styles.meta}>Each step is saved when you continue. You can edit it any time.</Text>
+        </View>
         <Button
-          title={step === TOTAL_STEPS ? (isEditing ? 'Save & submit' : 'Submit for review') : 'Save & continue'}
+          title={
+            index < STEPS.length - 1
+              ? 'Save & continue'
+              : isEditing
+                ? 'Save & submit for review'
+                : 'Save & continue to CNIC'
+          }
           disabled={removingImage}
-          loading={saving}
+          loading={saving || Boolean(uploading)}
           onPress={() => void onContinue()}
         />
-        {step > 1 && step < TOTAL_STEPS ? (
-          <Button title="Back" variant="outline" onPress={() => setStep((s) => s - 1)} />
-        ) : null}
       </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Small pieces                                                        */
+/* ------------------------------------------------------------------ */
+
+function SmallChip({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={styles.chip} accessibilityRole="button">
+      <Text style={styles.chipText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/** HH:MM with the colon added as you type ("930" → "09:30" on blur). */
+function TimeBox({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const ok = isTime(value);
+  return (
+    <View style={{ flex: 1, gap: 4 }}>
+      <Text style={styles.meta}>{label}</Text>
+      <TextInput
+        style={[styles.timeInput, !ok && { borderColor: Colors.danger }]}
+        value={value}
+        keyboardType="number-pad"
+        maxLength={5}
+        placeholder="09:00"
+        placeholderTextColor={Colors.mutedLight}
+        accessibilityLabel={`${label} time`}
+        onChangeText={(v) => {
+          const digits = v.replace(/\D/g, '').slice(0, 4);
+          onChange(digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits);
+        }}
+        onBlur={() => {
+          const digits = value.replace(/\D/g, '');
+          if (digits.length === 3) onChange(`0${digits[0]}:${digits.slice(1)}`);
+          else if (digits.length <= 2 && digits) onChange(`${digits.padStart(2, '0')}:00`);
+        }}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  heading: { ...Typography.h2, color: Colors.dark },
+  heading: { ...Typography.h2, color: Colors.primary },
   sub: { ...Typography.body, color: Colors.muted, lineHeight: 20 },
-  progressWrap: { gap: Spacing.sm },
-  progressText: { fontFamily: Fonts.bodyMedium, fontSize: 13, color: Colors.muted },
-  progressTrack: {
-    height: 6,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.inputBg,
-    overflow: 'hidden',
-  },
-  progressFill: { height: '100%', backgroundColor: Colors.primary },
-  genderBlock: { gap: Spacing.sm },
+  meta: { fontFamily: Fonts.body, fontSize: 12, color: Colors.muted },
+  link: { fontFamily: Fonts.bodySemiBold, fontSize: 14, color: Colors.primary },
+  error: { ...Typography.caption, color: Colors.danger },
   fieldLabel: { fontFamily: Fonts.bodySemiBold, fontSize: 14, color: Colors.dark },
-  genderRow: {
+  stepCount: { fontFamily: Fonts.bodySemiBold, fontSize: 12, color: Colors.primary, letterSpacing: 0.4, textTransform: 'uppercase' },
+  bar: { flexDirection: 'row', gap: 6 },
+  segment: { flex: 1, gap: 6 },
+  track: { height: 4, borderRadius: Radius.full, backgroundColor: Colors.border },
+  segLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  segLabel: { fontFamily: Fonts.body, fontSize: 11, color: Colors.muted, flexShrink: 1 },
+  segLabelActive: { fontFamily: Fonts.bodySemiBold, color: Colors.primary },
+  notice: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'center', padding: Spacing.md, borderRadius: Radius.md, backgroundColor: Colors.primarySoft },
+  noticeWarn: { backgroundColor: Colors.softAmber },
+  noticeText: { ...Typography.caption, color: Colors.dark, flex: 1 },
+  accountCard: {
     flexDirection: 'row',
-    gap: Spacing.sm,
-    backgroundColor: Colors.inputBg,
-    borderRadius: Radius.full,
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.md,
+    borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 3,
+    backgroundColor: Colors.card,
   },
-  genderChip: {
-    flex: 1,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radius.full,
-  },
-  genderChipActive: { backgroundColor: Colors.primary },
-  genderText: { fontFamily: Fonts.bodyMedium, fontSize: 14, color: Colors.muted },
-  genderTextActive: { fontFamily: Fonts.bodySemiBold, color: Colors.white },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
+  sectionNumber: { width: 26, height: 26, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.primarySoft },
+  sectionNumberText: { fontFamily: Fonts.bodySemiBold, fontSize: 12, color: Colors.primary },
+  sectionTitle: { fontFamily: Fonts.bodySemiBold, fontSize: 16, color: Colors.dark },
   chipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: Radius.full,
@@ -1001,17 +1010,48 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     backgroundColor: Colors.card,
   },
-  chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipOn: { borderColor: Colors.primary, backgroundColor: Colors.primarySoft },
   chipText: { fontFamily: Fonts.bodyMedium, fontSize: 13, color: Colors.dark },
-  chipTextActive: { color: Colors.white },
-  card: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.xl,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.md,
-    gap: Spacing.sm,
-  },
+  chipTextOn: { color: Colors.primary, fontFamily: Fonts.bodySemiBold },
+  card: { backgroundColor: Colors.card, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: Spacing.md, gap: Spacing.sm },
   cardTitle: { fontFamily: Fonts.bodySemiBold, fontSize: 15, color: Colors.dark },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  segmented: { flexDirection: 'row', gap: 4, padding: 3, borderRadius: Radius.full, backgroundColor: Colors.inputBg, borderWidth: 1, borderColor: Colors.border },
+  segBtn: { flex: 1, minHeight: 34, alignItems: 'center', justifyContent: 'center', borderRadius: Radius.full },
+  segBtnOn: { backgroundColor: Colors.primary },
+  segBtnText: { fontFamily: Fonts.bodyMedium, fontSize: 12, color: Colors.muted },
+  segBtnTextOn: { fontFamily: Fonts.bodySemiBold, color: Colors.white },
+  addRow: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.sm },
+  counter: { alignSelf: 'flex-end', fontFamily: Fonts.body, fontSize: 11, color: Colors.muted },
+  tag: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: Spacing.md, paddingRight: Spacing.sm, paddingVertical: 6, borderRadius: Radius.full, backgroundColor: Colors.primarySoft },
+  tagText: { fontFamily: Fonts.bodySemiBold, fontSize: 12.5, color: Colors.primary },
+  tagInputRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingLeft: Spacing.md, paddingRight: Spacing.sm, minHeight: 48, borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.inputBg },
+  tagInput: { flex: 1, fontFamily: Fonts.body, fontSize: 14, color: Colors.dark, paddingVertical: Spacing.sm },
+  tagAdd: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
+  serviceCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.card },
+  serviceIcon: { width: 38, height: 38, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.primarySoft },
+  price: { fontFamily: Fonts.bodySemiBold, fontSize: 14, color: Colors.primary, marginTop: 2 },
+  editor: { gap: Spacing.md, padding: Spacing.md, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.primary, backgroundColor: Colors.card },
+  optionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  option: { width: '48%', flexGrow: 1, padding: Spacing.md, borderRadius: Radius.md, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.card, gap: 2 },
+  optionOn: { borderColor: Colors.primary, backgroundColor: Colors.primarySoft },
+  optionTitle: { fontFamily: Fonts.bodySemiBold, fontSize: 14, color: Colors.dark },
+  or: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  orLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: Colors.border },
+  orText: { fontFamily: Fonts.bodySemiBold, fontSize: 11, color: Colors.mutedLight, letterSpacing: 0.6 },
+  dayRow: { gap: Spacing.sm, padding: Spacing.md, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.card },
+  dayOff: { backgroundColor: Colors.surfaceSecondary },
+  timeInput: {
+    minHeight: 44,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.inputBg,
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: 15,
+    color: Colors.dark,
+    textAlign: 'center',
+  },
+  saveNote: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center' },
 });

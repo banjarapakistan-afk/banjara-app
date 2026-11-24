@@ -1,8 +1,18 @@
-import { Stack } from 'expo-router';
+import { Redirect, Stack } from 'expo-router';
 import { useThemedStackOptions } from '@/hooks/useThemedStackOptions';
+import { useAuthStore } from '@/store/authStore';
+import { getHomeHref } from '@/utils/routing';
 
 export default function CustomerLayout() {
   const screenOptions = useThemedStackOptions();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const user = useAuthStore((state) => state.user);
+
+  // Traveller screens are for traveller accounts (and guests). Provider accounts are
+  // separate and always go to their own area.
+  if (isAuthenticated && user?.role === 'provider') {
+    return <Redirect href={getHomeHref(user)} />;
+  }
 
   return (
     <Stack screenOptions={screenOptions}>
@@ -34,6 +44,9 @@ export default function CustomerLayout() {
       <Stack.Screen name="hotels/booking-details/[id]" />
       <Stack.Screen name="explore/map" />
       <Stack.Screen name="explore/nearby" />
+      <Stack.Screen name="intercity/index" />
+      <Stack.Screen name="intercity/[id]" />
+      <Stack.Screen name="intercity/mine" />
       <Stack.Screen name="restaurants/[id]" />
       <Stack.Screen name="tours/[id]" />
       <Stack.Screen name="tours/book/[id]" />

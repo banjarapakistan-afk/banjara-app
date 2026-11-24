@@ -204,10 +204,7 @@ export function HotelDetailsPresentation({
   onProfile,
   onSelectRoom,
   onMap,
-  onCall,
-  onLandline,
-  onEmail,
-  onWebsite,
+  onMessage,
 }: {
   hotel: Hotel;
   loading: boolean;
@@ -216,10 +213,8 @@ export function HotelDetailsPresentation({
   onProfile: () => void;
   onSelectRoom: () => void;
   onMap: () => void;
-  onCall?: () => void;
-  onLandline?: () => void;
-  onEmail?: () => void;
-  onWebsite?: () => void;
+  /** Opens the in-app chat with the property's provider. */
+  onMessage?: () => void;
 }) {
   const theme = useHotelDesign();
   const insets = useSafeAreaInsets();
@@ -368,30 +363,6 @@ export function HotelDetailsPresentation({
                 label="Check-out"
                 value={hotelTimeLabel(hotel.checkOutTime)}
               />
-              <HotelContactRow
-                icon="call-outline"
-                label="Contact phone"
-                value={hotel.phone}
-                onPress={onCall}
-              />
-              <HotelContactRow
-                icon="phone-portrait-outline"
-                label="Landline"
-                value={hotel.landline || ''}
-                onPress={onLandline}
-              />
-              <HotelContactRow
-                icon="mail-outline"
-                label="Email"
-                value={hotel.email}
-                onPress={onEmail}
-              />
-              <HotelContactRow
-                icon="globe-outline"
-                label="Website"
-                value={hotel.website || ''}
-                onPress={onWebsite}
-              />
             </TravelSurface>
 
             <View style={s.section}>
@@ -419,13 +390,13 @@ export function HotelDetailsPresentation({
               />
             </View>
             <View style={s.actions}>
-              {onCall ? (
+              {onMessage ? (
                 <Button
-                  title="Call property"
+                  title="Message"
                   variant="outline"
                   textColor={theme.text}
-                  onPress={onCall}
-                  icon={<Ionicons name="call-outline" size={15} color={theme.primary} />}
+                  onPress={onMessage}
+                  icon={<Ionicons name="chatbubble-ellipses-outline" size={15} color={theme.primary} />}
                   style={s.secondaryButton}
                 />
               ) : null}

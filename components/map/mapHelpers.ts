@@ -116,7 +116,8 @@ export type MapVehicleInfo = {
   typeLabel?: string;
   plate?: string;
   imageUrl?: string;
-  phone?: string;
+  /** Provider user id — opens the in-app chat (no direct phone for customers). */
+  providerUserId?: string;
   agencyName?: string;
   agencyLogo?: string;
   rating?: number;

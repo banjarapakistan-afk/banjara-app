@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform } from 'react-native';
 import { useProviderFormDraft } from '@/hooks/useProviderFormDraft';
@@ -281,6 +281,10 @@ export default function AddVehicleScreen() {
       ],
     );
   };
+
+  // During signup the vehicle is part of the "Your vehicle" step; old links land there.
+  if (params.mode === 'onboarding')
+    return <Redirect href="/(provider)/register/transport" />;
 
   return (
     <KeyboardAvoidingView

@@ -20,7 +20,6 @@ import {
 } from '@/components/home/HomeDiscovery';
 import { useHomeDesign } from '@/constants/homeDesign';
 import {
-  TravelSegmentedControl,
   TravelSection as HomeSection,
 } from '@/components/ui/TravelPrimitives';
 
@@ -36,10 +35,12 @@ import {
 } from '@/components/ui/TravelDesignProvider';
 import { TravelOptionRow } from '@/components/ui/TravelForm';
 import { HomeNameSearch } from '@/components/home/HomeSearchControls';
+import { CityToCityEntry } from '@/components/intercity/CityToCityEntry';
+import { HomeProviderInvite } from '@/components/home/HomeProviderInvite';
+import { HomeReviews } from '@/components/home/HomeReviews';
 import {
   POPULAR_DESTINATIONS,
   POPULAR_ROUTE_SUGGESTIONS,
-  destinationImageFor,
   destinationMetaFor,
 } from '@/constants/destinations';
 import {
@@ -64,22 +65,11 @@ import { formatDate } from '@/utils/formatDate';
 import { formatDuration } from '@/utils/formatTime';
 import { pushPath } from '@/utils/navigation';
 import type { LocationPickerValue } from '@/types/location';
+import { Tappable } from '@/components/ui/Tappable';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 type HomeMode = HomeServiceCategory;
-
-function SegmentChips<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: Array<{ id: T; label: string }>;
-  value: T;
-  onChange: (id: T) => void;
-}) {
-  return <TravelSegmentedControl options={options} value={value} onChange={onChange} />;
-}
 
 function shortDate(iso: string) {
   try {
@@ -142,56 +132,6 @@ function RecentHotelRow({
         <Text style={[styles.recentDetails, { color: colors.muted }]} numberOfLines={1}>
           {shortDate(item.checkIn)} → {shortDate(item.checkOut)} · {nights} night
           {nights === 1 ? '' : 's'}
-        </Text>
-      </View>
-      <Ionicons name="chevron-forward" size={17} color={colors.mutedLight} />
-    </AnimatedPressable>
-  );
-}
-
-function RecentRideRow({ item, onPress }: { item: any; onPress: () => void }) {
-  const colors = useThemeColors();
-  const scale = useSharedValue(1);
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <AnimatedPressable
-      onPress={onPress}
-      onPressIn={() => {
-        scale.value = withSpring(0.985, { damping: 16, stiffness: 300 });
-      }}
-      onPressOut={() => {
-        scale.value = withSpring(1, { damping: 16, stiffness: 300 });
-      }}
-      style={[
-        styles.recentRowCard,
-        { backgroundColor: colors.card, borderColor: colors.border },
-        animStyle,
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={`Continue search ${item.from} to ${item.to}`}
-    >
-      <Image
-        source={{ uri: destinationImageFor(item.to) }}
-        style={styles.recentThumb}
-        contentFit="cover"
-        transition={200}
-      />
-      <View style={styles.recentBody}>
-        <View style={styles.recentTitleRow}>
-          <Text style={[styles.recentPlace, { color: colors.dark }]} numberOfLines={1}>
-            {item.from} → {item.to}
-          </Text>
-          <View style={[styles.recentTypeChip, { backgroundColor: colors.softGreen }]}>
-            <Text style={[styles.recentTypeText, { color: colors.action }]}>
-              {item.productMode === 'trips' ? 'TRIP' : 'RIDE'}
-            </Text>
-          </View>
-        </View>
-        <Text style={[styles.recentDetails, { color: colors.muted }]} numberOfLines={1}>
-          {shortDate(item.date)} · {item.passengers} passenger{item.passengers === 1 ? '' : 's'}
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={17} color={colors.mutedLight} />
@@ -276,6 +216,9 @@ let lastHomeFocusRefreshAt = 0;
 
 export default function HomeScreen() {
   const user = useAuthStore((state) => state.user);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  // Guests browse with a placeholder user (id "guest"); they are not signed in.
+  const signedIn = isAuthenticated && !!user && user.id !== 'guest';
   const homeTheme = useHomeDesign();
   const profile = useUserStore((state) => state.profile);
   const toggleSavedTrip = useUserStore((state) => state.toggleSavedTrip);
@@ -382,16 +325,6 @@ export default function HomeScreen() {
   }, [bookingKind, journeyTrips]);
 
   const today = todayIsoDate();
-
-  /** Live rides — only trips departing today. */
-  const liveTodayTrips = useMemo(
-    () =>
-      [...modeTrips]
-        .filter((trip) => String(trip.date || '').slice(0, 10) === today)
-        .sort((a, b) => `${a.date}${a.departureTime}`.localeCompare(`${b.date}${b.departureTime}`))
-        .slice(0, 3),
-    [modeTrips, today],
-  );
 
   /** Continue searching — all trips transporters currently offer. */
   const allTransporterTrips = useMemo(
@@ -523,7 +456,6 @@ export default function HomeScreen() {
   const stayTitle = 'Looking for a place to stay';
   const staySubtitle =
     'Choose among the best hotels, lodges and guest houses available at your destination.';
-  const rideTitle = 'Live rides';
   const searchCta =
     mode === 'hotels'
       ? 'Search stays'
@@ -534,25 +466,62 @@ export default function HomeScreen() {
           : 'Search rides';
 
   /** Home only starts the journey; full catalogs live in Explore. */
+  // Rides live on the map (all rides); the other services open their Explore tab.
   const openExplore = (service: HomeMode) =>
-    router.push({ pathname: '/(customer)/(tabs)/search', params: { service } });
+    service === 'transport'
+      ? router.push('/(customer)/explore/nearby')
+      : router.push({ pathname: '/(customer)/(tabs)/search', params: { service } });
 
-  const SERVICE_LABEL: Partial<Record<HomeMode, string>> = {
-    tours: 'tours',
-    guides: 'guides',
-    restaurants: 'restaurants',
+  // A clear invitation (not an "empty" box) for services that are browsed in Explore.
+  const SERVICE_INVITE: Partial<
+    Record<HomeMode, { noun: string; icon: keyof typeof Ionicons.glyphMap; body: string }>
+  > = {
+    tours: {
+      noun: 'tours',
+      icon: 'trail-sign-outline',
+      body: 'Treks, expeditions and summit trips run by local operators, with prices and dates up front.',
+    },
+    guides: {
+      noun: 'guides',
+      icon: 'compass-outline',
+      body: 'Verified local guides who know every trail, viewpoint and tea stop in the valley.',
+    },
+    restaurants: {
+      noun: 'restaurants',
+      icon: 'restaurant-outline',
+      body: 'Local restaurants with menus, offers and ratings from travellers.',
+    },
   };
-  const serviceExploreBlock =
-    mode === 'tours' || mode === 'guides' || mode === 'restaurants' ? (
-      <HomeSection title={`Find ${SERVICE_LABEL[mode]}`}>
-        <EmptyState
-          title={`Browse ${SERVICE_LABEL[mode]} on Explore`}
-          message="Search, filter and compare everything available in one place."
-          actionLabel={`Explore ${SERVICE_LABEL[mode]}`}
-          onAction={() => openExplore(mode)}
-        />
-      </HomeSection>
-    ) : null;
+  const invite = SERVICE_INVITE[mode];
+  const serviceExploreBlock = invite ? (
+    <HomeSection title={`Find ${invite.noun}`}>
+      <Tappable
+        onPress={() => openExplore(mode)}
+        accessibilityRole="button"
+        accessibilityLabel={`Browse ${invite.noun} in Explore`}
+        style={({ pressed }) => [
+          styles.invite,
+          {
+            backgroundColor: homeTheme.surface,
+            borderColor: homeTheme.border,
+            opacity: pressed ? 0.92 : 1,
+          },
+        ]}
+      >
+        <View style={[styles.inviteIcon, { backgroundColor: homeTheme.soft }]}>
+          <Ionicons name={invite.icon} size={24} color={homeTheme.primary} />
+        </View>
+        <Text style={[styles.inviteTitle, { color: homeTheme.text }]}>
+          Browse all {invite.noun}
+        </Text>
+        <Text style={[styles.inviteBody, { color: homeTheme.muted }]}>{invite.body}</Text>
+        <View style={[styles.inviteCta, { backgroundColor: homeTheme.action }]}>
+          <Text style={styles.inviteCtaText}>Explore {invite.noun}</Text>
+          <Ionicons name="arrow-forward" size={16} color="#fff" />
+        </View>
+      </Tappable>
+    </HomeSection>
+  ) : null;
 
   const searchMethod = (
     <TravelOptionRow
@@ -569,9 +538,31 @@ export default function HomeScreen() {
       ]}
     />
   );
-  const transportPreferences =
-    transportPanel === 'customise' ? (
-      <View style={{ gap: 6, borderTopWidth: 1, borderTopColor: homeTheme.border, paddingTop: 10 }}>
+  // Extra search options open inside the search card itself (not a separate switch
+  // under it), and never change which rides are listed below.
+  const moreOptions = transportPanel === 'customise';
+  const transportPreferences = (
+    <View style={{ gap: 6, borderTopWidth: 1, borderTopColor: homeTheme.border, paddingTop: 10 }}>
+      <Pressable
+        onPress={() => setTransportPanel(moreOptions ? 'available' : 'customise')}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: moreOptions }}
+        accessibilityLabel={moreOptions ? 'Hide search options' : 'More search options'}
+        hitSlop={8}
+        style={styles.moreOptions}
+      >
+        <Ionicons name="options-outline" size={16} color={homeTheme.primary} />
+        <Text style={[styles.moreOptionsText, { color: homeTheme.primary }]}>
+          {moreOptions ? 'Fewer options' : 'Return trip, whole vehicle or search by name'}
+        </Text>
+        <Ionicons
+          name={moreOptions ? 'chevron-up' : 'chevron-down'}
+          size={16}
+          color={homeTheme.primary}
+        />
+      </Pressable>
+      {moreOptions ? (
+      <>
         <TravelOptionRow
           label="Journey"
           value={journeyKind}
@@ -591,8 +582,10 @@ export default function HomeScreen() {
           ]}
         />
         {searchMethod}
-      </View>
-    ) : null;
+      </>
+      ) : null}
+    </View>
+  );
 
   const searchBlock =
     mode === 'tours' || mode === 'guides' || mode === 'restaurants' ? null : (
@@ -648,14 +641,7 @@ export default function HomeScreen() {
                 preferences={transportPreferences}
               />
             )}
-            <SegmentChips
-              value={transportPanel}
-              onChange={setTransportPanel}
-              options={[
-                { id: 'available' as const, label: 'Available rides' },
-                { id: 'customise' as const, label: 'Customise route' },
-              ]}
-            />
+            <CityToCityEntry />
             <LocationPinSheet
               visible={locationField !== null}
               title={locationField === 'from' ? 'Departure location' : 'Destination'}
@@ -775,48 +761,6 @@ export default function HomeScreen() {
     />
   );
 
-  const ridesSection = (
-    <HomeSection
-      title={rideTitle}
-      subtitle="Only rides departing today"
-      actionLabel="View all"
-      onAction={() => router.push('/(customer)/results')}
-    >
-      {loading && liveTodayTrips.length === 0 ? (
-        <View style={styles.stack}>
-          <TripCardSkeleton />
-          <TripCardSkeleton />
-        </View>
-      ) : error && liveTodayTrips.length === 0 ? (
-        <EmptyState
-          title="Could not load trips"
-          message="Check your connection and try again."
-          actionLabel="Try again"
-          onAction={() => void refreshTrips()}
-        />
-      ) : liveTodayTrips.length === 0 ? (
-        <EmptyState
-          title="No live rides today"
-          message="Check Available rides or search another date for vans, buses, and seats."
-          actionLabel={searchCta}
-          onAction={onSearchTransport}
-        />
-      ) : (
-        <View style={styles.stack}>
-          {liveTodayTrips.map((trip) => (
-            <HomeRideCard
-              key={trip.id}
-              trip={trip}
-              saved={savedIds.includes(trip.id)}
-              onSave={() => onSaveTrip(trip.id)}
-              onPress={() => openTrip(trip.id)}
-            />
-          ))}
-        </View>
-      )}
-    </HomeSection>
-  );
-
   const renderStays = (layout: 'detail' | 'rail') => (
     <HomeSection
       title={stayTitle}
@@ -914,6 +858,8 @@ export default function HomeScreen() {
           onSearch={() => router.push('/(customer)/(tabs)/search')}
           onNotifications={() => pushPath('/(customer)/(tabs)/notifications')}
           onProfile={() => pushPath('/(customer)/(tabs)/profile')}
+          signedIn={signedIn}
+          onLogin={() => router.push('/(auth)/login')}
         />
         <ScrollView
           ref={scrollRef}
@@ -967,10 +913,9 @@ export default function HomeScreen() {
             </>
           ) : (
             <>
-              {transportPanel === 'available' ? (
-                <HomeSection
+              <HomeSection
                   title="Available rides"
-
+                  subtitle="Upcoming rides from verified local drivers"
                   actionLabel="View all"
                   onAction={() => router.push('/(customer)/results')}
                 >
@@ -989,9 +934,9 @@ export default function HomeScreen() {
                   ) : modeTrips.length === 0 ? (
                     <EmptyState
                       title="No rides available"
-                      message="Try Customise your route or another date."
-                      actionLabel="Customise route"
-                      onAction={() => setTransportPanel('customise')}
+                      message="Try another route or date in the search above."
+                      actionLabel="See rides on the map"
+                      onAction={() => openExplore('transport')}
                     />
                   ) : (
                     <View style={styles.stack}>
@@ -1007,15 +952,15 @@ export default function HomeScreen() {
                     </View>
                   )}
                 </HomeSection>
-              ) : (
-                <>
-                  {ridesSection}
-                  {routesSection}
-                </>
-              )}
+              {liveRoutes.length > 0 ? routesSection : null}
               {destinationsSection}
             </>
           )}
+
+          {/* Real reviews from completed bookings; hidden until customers leave some. */}
+          <HomeReviews />
+
+          <HomeProviderInvite signedIn={signedIn} />
 
           <HomeHelp onPress={() => router.push('/(customer)/(tabs)/inbox')} />
         </ScrollView>
@@ -1034,122 +979,42 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.screen,
     gap: Spacing.md,
   },
-  transportControls: {
-    borderRadius: Radius.xl,
+  moreOptions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 44,
+  },
+  moreOptionsText: { flex: 1, fontFamily: Fonts.bodyMedium, fontSize: 13 },
+  invite: {
     borderWidth: 1,
-    padding: Spacing.sm,
-    gap: Spacing.sm,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    gap: 8,
     ...Shadows.soft,
   },
-  segmentTrack: {
-    flexDirection: 'row',
-    width: '100%',
-    alignItems: 'stretch',
-    borderRadius: Radius.full,
-    borderWidth: 1,
-    padding: 3,
-    gap: 0,
-  },
-  segmentChip: {
-    flex: 1,
-    minHeight: 42,
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    borderRadius: Radius.full,
+  inviteIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 4,
   },
-  segmentChipText: {
-    fontSize: 12,
-    letterSpacing: -0.2,
-    textAlign: 'center',
+  inviteTitle: { fontFamily: Fonts.display, fontSize: 18 },
+  inviteBody: { fontFamily: Fonts.body, fontSize: 14, lineHeight: 20 },
+  inviteCta: {
+    marginTop: 8,
+    minHeight: 48,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
+  inviteCtaText: { color: '#fff', fontFamily: Fonts.bodySemiBold, fontSize: 15 },
   hRow: {
     paddingHorizontal: Spacing.screen,
-  },
-  blogCard: {
-    width: 268,
-    marginRight: Spacing.sm,
-    borderRadius: Radius.xl,
-    borderWidth: 1,
-    overflow: 'hidden',
-    ...Shadows.card,
-  },
-  blogImage: {
-    width: '100%',
-    height: 120,
-    backgroundColor: Colors.border,
-  },
-  blogCopy: {
-    padding: Spacing.md,
-    gap: 4,
-  },
-  blogPlace: {
-    fontFamily: Fonts.bodySemiBold,
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  blogTitle: {
-    fontFamily: Fonts.bodySemiBold,
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  blogExcerpt: {
-    fontFamily: Fonts.body,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  blogMeta: {
-    fontFamily: Fonts.bodyMedium,
-    fontSize: 11,
-    marginTop: 4,
-  },
-  testimonialCard: {
-    width: 300,
-    marginRight: Spacing.sm,
-    borderRadius: Radius.xl,
-    borderWidth: 1,
-    padding: Spacing.lg,
-    gap: Spacing.md,
-    ...Shadows.card,
-  },
-  testimonialHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  testimonialAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: Colors.border,
-  },
-  testimonialName: {
-    fontFamily: Fonts.bodySemiBold,
-    fontSize: 14,
-  },
-  testimonialMeta: {
-    fontFamily: Fonts.body,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  ratingPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: Radius.full,
-  },
-  ratingText: {
-    fontFamily: Fonts.bodySemiBold,
-    fontSize: 12,
-  },
-  testimonialQuote: {
-    fontFamily: Fonts.body,
-    fontSize: 13,
-    lineHeight: 19,
   },
   stack: {
     paddingHorizontal: Spacing.screen,
@@ -1263,56 +1128,5 @@ const styles = StyleSheet.create({
   routeLive: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: 12,
-  },
-  storyCard: {
-    width: 260,
-    height: 180,
-    marginRight: Spacing.sm,
-    borderRadius: Radius['3xl'],
-    overflow: 'hidden',
-    backgroundColor: Colors.border,
-  },
-  storyImage: { ...StyleSheet.absoluteFill },
-  storyOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    padding: Spacing.lg,
-  },
-  storyTitle: {
-    fontFamily: Fonts.display,
-    fontSize: 20,
-    color: Colors.card,
-  },
-  storySub: {
-    fontFamily: Fonts.body,
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.86)',
-    marginTop: 4,
-  },
-  finalCta: {
-    marginHorizontal: Spacing.screen,
-    marginTop: Spacing.xl,
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.hero,
-    padding: Spacing.xl,
-    gap: Spacing.sm,
-  },
-  finalCtaTitle: {
-    fontFamily: Fonts.display,
-    fontSize: 24,
-    lineHeight: 30,
-    color: Colors.white,
-  },
-  finalCtaSub: {
-    fontFamily: Fonts.body,
-    fontSize: 14,
-    lineHeight: 20,
-    color: 'rgba(255,255,255,0.78)',
-    marginBottom: Spacing.sm,
-  },
-  finalCtaBtn: {
-    backgroundColor: '#08111F',
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.xl,
   },
 });
