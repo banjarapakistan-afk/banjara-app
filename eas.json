@@ -16,6 +16,15 @@
         "simulator": false
       }
     },
+    "production": {
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://banjara-backend-test.onrender.com/api"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
     "preview-simulator": {
       "distribution": "internal",
       "env": {
